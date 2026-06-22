@@ -169,13 +169,17 @@
 
 ---
 
-## Part 5 — Actor (team-specific) — Phase 13 🔲 To do
-> Strategy brain. Each team implements their own. Not shared.
+## Part 5 — Actor — Phase 13 🔲 To do
+> ActorWrapper + RandomActorBackend (default) + RLActorBackend stub (interface only).
+> The Agent calls ActorWrapper.get_action(obs) → (action, message). It never calls a backend directly.
 
-- [ ] `src/actor/actor.py` — base interface: `decide(obs: ObservationState) → str`
-- [ ] `src/actor/heuristic.py` — simple heuristic (Manhattan distance cop, escape-maximizing thief)
-- [ ] Wire Actor into Agent retry loop as the LLM-call provider
-- [ ] Basic tests: actor returns a legal action for given observation
+- [ ] `src/actor/base_actor.py` — `BaseActor` ABC: `get_action(obs) → str`, `on_result(obs, action, result)` (default no-op)
+- [ ] `src/actor/actor_wrapper.py` — `ActorWrapper`: calls `backend.get_action()`, generates NL message from template, exposes `on_result()` passthrough
+- [ ] `src/actor/random_actor.py` — `RandomActorBackend`: `random.choice(obs.legal_moves)`; `on_result` is no-op
+- [ ] `src/actor/rl_actor.py` — `RLActorBackend` stub: `get_action` and `on_result` raise `NotImplementedError`; internals come from a separate repo
+- [ ] Wire `ActorWrapper` into `Agent` — Agent calls `wrapper.get_action(obs)` and `wrapper.on_result(obs, action, result)` after each turn
+- [ ] `tests/unit/test_actor_wrapper.py` — wrapper returns `(action, message)` tuple; delegates to backend; message is non-empty string
+- [ ] `tests/unit/test_random_actor.py` — always returns a value from `obs.legal_moves`; no errors on any legal observation
 
 ---
 
