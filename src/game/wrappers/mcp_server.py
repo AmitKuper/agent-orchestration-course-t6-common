@@ -18,7 +18,7 @@ from game.sdk.sdk import get_state as sdk_get_state
 from game.sdk.sdk import new_game as sdk_new_game
 from game.sdk.sdk import state_hash as sdk_hash
 from game.sdk.sdk import submit_action as sdk_submit_action
-from game.wrappers.mcp_routes import register_routes
+from game.wrappers.mcp_routes import _patch_state_game_id, register_routes
 from game.wrappers.mcp_state import games_base, server_state
 
 mcp = FastMCP(
@@ -59,6 +59,7 @@ def new_game_tool(
             src = games_base() / auto_id
             if src.exists():
                 shutil.move(str(src), str(games_base() / game_id))
+        _patch_state_game_id(game_id)
         return json.dumps({"game_id": game_id})
     except Exception as exc:
         return json.dumps({"error": str(exc)})
@@ -115,7 +116,7 @@ def main() -> None:
     args = parser.parse_args()
     server_state["games_base"] = Path(args.games_dir)
     server_state["games_base"].mkdir(parents=True, exist_ok=True)
-    mcp.run(transport="streamable-http", host=args.host, port=args.port)
+    mcp.run(transport="streamable-http", host=args.host, port=args.port, json_response=True)
 
 
 if __name__ == "__main__":

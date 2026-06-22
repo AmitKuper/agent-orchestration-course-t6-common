@@ -6,6 +6,7 @@ circular imports between mcp_server and its route handlers.
 
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import asdict
 from typing import TYPE_CHECKING
@@ -20,6 +21,24 @@ from game.wrappers.mcp_state import auth_ok, games_base, server_state
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
+
+
+def _patch_state_game_id(game_id: str) -> None:
+    """Update the game_id field in state.json after a directory rename.
+
+    When sdk_new_game creates a game with an auto-generated ID and the
+    directory is then renamed to the agreed game_id, the state.json still
+    contains the old ID. This helper fixes it so save_state writes back
+    to the correct directory.
+
+    Args:
+        game_id: The agreed game identifier (also the directory name).
+    """
+    state_file = games_base() / game_id / "state.json"
+    if state_file.exists():
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+        data["game_id"] = game_id
+        state_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def register_routes(mcp: FastMCP) -> None:
@@ -65,6 +84,7 @@ def register_routes(mcp: FastMCP) -> None:
         auto_id = result["game_id"]
         if auto_id != game_id and (games_base() / auto_id).exists():
             shutil.move(str(games_base() / auto_id), str(games_base() / game_id))
+        _patch_state_game_id(game_id)
         server_state["matches"][game_id] = {
             "role": data.get("my_role", "cop"), "seed": data["seed"],
         }
