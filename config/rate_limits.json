@@ -1,0 +1,14 @@
+{
+  "claude-opus-4-8": {
+    "rpm": 50,
+    "tpm": 100000
+  },
+  "claude-sonnet-4-6": {
+    "rpm": 100,
+    "tpm": 200000
+  },
+  "claude-haiku-4-5": {
+    "rpm": 200,
+    "tpm": 400000
+  }
+}
