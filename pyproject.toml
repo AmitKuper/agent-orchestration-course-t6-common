@@ -11,13 +11,15 @@ dependencies = [
     "pyyaml>=6.0",
     "fastmcp>=2.0",
     "crewai>=0.80",
+    "httpx>=0.28.1",
+    "anthropic>=0.111.0",
 ]
 
 [project.scripts]
 game = "game.__main__:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/game"]
+packages = ["src/game", "src/actor"]
 
 [tool.ruff]
 line-length = 100
@@ -34,6 +36,7 @@ convention = "google"
 testpaths = ["tests"]
 addopts = "--tb=short -q"
 pythonpath = ["src"]
+filterwarnings = ["ignore::DeprecationWarning"]
 
 [tool.coverage.run]
 source = ["src/game"]

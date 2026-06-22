@@ -63,7 +63,8 @@ def test_sdk_log_written_on_each_action() -> None:
         for actor, action in [(COP, "E"), (THIEF, "W"), (COP, "E")]:
             sdk.submit_action(gid, actor, action, games_base=base)
         lines = (base / gid / "game.log").read_text().splitlines()
-        assert len(lines) == 3
+        # 1 setup entry + 3 turn entries
+        assert len(lines) == 4
 
 
 def test_sdk_terminal_log_on_game_over() -> None:
@@ -94,8 +95,8 @@ def test_full_game_replay_from_log() -> None:
         sdk.submit_action(gid, THIEF, "NW", games_base=base)
 
         lines = (base / gid / "game.log").read_text().splitlines()
-        # Filter out the terminal entry — replay only action entries
-        actions = [json.loads(ln) for ln in lines if json.loads(ln).get("type") != "terminal"]
+        # Replay only turn entries (skip setup and terminal)
+        actions = [json.loads(ln) for ln in lines if json.loads(ln).get("type") == "turn"]
 
         g2 = Game.new("replay_check", (3, 3), (0, 0), (2, 2))
         final = None

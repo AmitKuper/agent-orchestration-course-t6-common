@@ -17,16 +17,11 @@ if TYPE_CHECKING:
 _DEFAULT_GAMES_DIR = Path("games")
 
 
-def games_dir(base: Path | None = None) -> Path:
-    """Return the root games directory, creating it if necessary."""
-    root = base or _DEFAULT_GAMES_DIR
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
 def game_dir(game_id: str, base: Path | None = None) -> Path:
     """Return the directory for a specific game, creating it if necessary."""
-    d = games_dir(base) / game_id
+    root = base or _DEFAULT_GAMES_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    d = root / game_id
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -44,18 +39,17 @@ def save_state(game: Game, base: Path | None = None) -> None:
 
 
 def load_state(game_id: str, base: Path | None = None) -> Game:
-    """Load a Game instance from games/<game_id>/state.json.
+    """Load a Game from games/<game_id>/state.json.
 
     Raises:
         FileNotFoundError: If no state.json exists for the given game_id.
     """
-    from game.game import Game  # local import to avoid circular dependency
+    from game.game import Game  # local import avoids circular dependency
 
-    path = games_dir(base) / game_id / "state.json"
+    path = (base or _DEFAULT_GAMES_DIR) / game_id / "state.json"
     if not path.exists():
         raise FileNotFoundError(f"No game state found for game_id={game_id!r}")
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return Game.from_dict(data)
+    return Game.from_dict(json.loads(path.read_text(encoding="utf-8")))
 
 
 def _write_log_line(game_id: str, entry: dict, base: Path | None) -> None:
@@ -63,6 +57,39 @@ def _write_log_line(game_id: str, entry: dict, base: Path | None) -> None:
     log_path = game_dir(game_id, base) / "game.log"
     with log_path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
+
+
+def append_setup_log(
+    game_id: str,
+    seed: int | None,
+    mechanics: dict,
+    grid_size: tuple[int, int],
+    cop_pos: tuple[int, int],
+    thief_pos: tuple[int, int],
+    base: Path | None = None,
+) -> None:
+    """Append the initial setup entry to game.log when a game is created.
+
+    Args:
+        game_id: The game identifier.
+        seed: Random seed used to derive start positions (None if manual).
+        mechanics: Agreed game mechanics dict.
+        grid_size: (cols, rows) of the grid.
+        cop_pos: Cop starting position (col, row).
+        thief_pos: Thief starting position (col, row).
+        base: Optional override for the games root directory.
+    """
+    entry: dict[str, Any] = {
+        "ts": datetime.now(UTC).isoformat(),
+        "game_id": game_id,
+        "type": "setup",
+        "seed": seed,
+        "grid": list(grid_size),
+        "cop": list(cop_pos),
+        "thief": list(thief_pos),
+        "mechanics": mechanics,
+    }
+    _write_log_line(game_id, entry, base)
 
 
 def append_log(
@@ -73,32 +100,23 @@ def append_log(
     from_pos: tuple[int, int],
     to_pos: tuple[int, int],
     game: Game,
+    message: str | None = None,
     base: Path | None = None,
 ) -> None:
-    """Append a per-turn JSONL entry (PRD §4.1 format) to game.log.
-
-    Args:
-        game_id: The game identifier.
-        actor: "cop" or "thief".
-        action: Raw action string (direction or BARRIER).
-        result: ActionResult from submit_action.
-        from_pos: Actor's position before the action.
-        to_pos: Actor's position after the action (unchanged if action failed).
-        game: Updated Game instance (used for state_after snapshot).
-        base: Optional override for the games root directory.
-    """
+    """Append a per-turn JSONL entry (PRD §4.1 format) to game.log."""
     is_barrier = action.upper() == "BARRIER"
     state = game.to_dict()
     entry: dict[str, Any] = {
         "ts": datetime.now(UTC).isoformat(),
         "game_id": game_id,
+        "type": "turn",
         "turn": state["turn"],
         "actor": actor,
         "action": "barrier" if is_barrier else "move",
         "from": list(from_pos),
         "to": list(to_pos),
         "barrier_at": list(from_pos) if is_barrier and result.success else None,
-        "message": None,
+        "message": message,
         "success": result.success,
         "error": result.error,
         "state_after": {
@@ -116,14 +134,7 @@ def append_terminal_log(
     game: Game,
     base: Path | None = None,
 ) -> None:
-    """Append the terminal summary entry to game.log on game-over.
-
-    Args:
-        game_id: The game identifier.
-        result: The game-over ActionResult.
-        game: Final Game instance (for round count, barriers used, mechanics).
-        base: Optional override for the games root directory.
-    """
+    """Append the terminal summary entry to game.log on game-over."""
     state = game.to_dict()
     scores = compute_scores(result.winner, state.get("mechanics", {}))
     entry: dict[str, Any] = {

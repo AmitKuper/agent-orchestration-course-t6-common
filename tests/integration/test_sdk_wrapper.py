@@ -77,7 +77,8 @@ def test_sdk_log_appended_for_every_call() -> None:
         sdk.submit_action(gid, "thief", "W", games_base=base) # legal
 
         lines = (base / gid / "game.log").read_text().splitlines()
-        assert len(lines) == 3
+        # 1 setup entry + 3 turn entries
+        assert len(lines) == 4
 
 
 def test_sdk_get_state_reflects_moves() -> None:
@@ -132,6 +133,9 @@ def test_sdk_barrier_appears_in_log() -> None:
         gid = info["game_id"]
 
         sdk.submit_action(gid, "cop", "BARRIER", games_base=base)
-        line = json.loads((base / gid / "game.log").read_text().strip())
-        assert line["action"] == "barrier"
-        assert line["success"] is True
+        # game.log has setup + turn entries; find the turn entry
+        lines = (base / gid / "game.log").read_text().splitlines()
+        entries = [json.loads(ln) for ln in lines]
+        turn = next(e for e in entries if e.get("type") == "turn")
+        assert turn["action"] == "barrier"
+        assert turn["success"] is True
