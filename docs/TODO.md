@@ -26,14 +26,14 @@
 - [x] `MoveAction` / `BarrierAction` typed input objects
 - [x] `constants.py` — directions, win reasons, actor names
 
-### Phase 3 — Persistence ✅ Complete
+### Phase 3 — Persistence ✅ Complete (commit 9fad400)
 > Game instance directory under `games/<game_id>/`.
 
 - [x] Generate `game_id` on `Game.new()`
 - [x] Write `state.json` on every `submit_action`
 - [x] Append JSONL entry to `game.log` on every `submit_action` (PRD §4.1 format)
 - [x] `Game.load(game_id)` — restore instance from `state.json`
-- [ ] Write terminal log entry on game over (winner, win_reason, scores, rounds)
+- [x] Write terminal log entry on game over (winner, win_reason, scores, rounds)
 
 ### Phase 4 — Test Suite ✅ Complete
 > Target ≥ 85% coverage. Zero Ruff violations.
