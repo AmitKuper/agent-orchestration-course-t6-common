@@ -1,6 +1,6 @@
 # TODO
 
-## Game Engine
+## Game Engine — Part 1
 
 ### Phase 1 — Core State Machine ✅ Complete
 > Pure Python `Game` class, no external dependencies.
@@ -45,7 +45,7 @@
 - [x] Unit tests for `state_hash` determinism
 - [x] Integration tests — full sub-game replay from log
 - [x] Integration tests — illegal move retry flow
-> Coverage: 97% | Tests: 45 passed | Ruff: 0 violations
+> Coverage: 97% | Tests: 84 passed | Ruff: 0 violations
 
 ### Phase 5 — CLI Wrapper ✅ Complete
 > `python -m game <command>` — JSON to stdout, errors to stderr.
@@ -65,21 +65,133 @@
 - [x] Tool descriptions written for LLM consumption
 
 ### Phase 7 — FastMCP Wrapper ✅ Complete
-> FastMCP tools for production MCP server.
+> FastMCP game-engine tools (Part 3 inter-server tools are in Phase 10).
 
 - [x] Register `new_game`, `submit_action`, `get_state`, `game_hash` as MCP tools
-- [ ] MCP prompts — role grounding (cop vs. thief rules, turn order)
-- [ ] MCP resources — live config + current game state
-- [ ] API key authentication (`MCP_ALLOWED_API_KEYS`, `MCP_API_KEY`)
 
-### Phase 8 — Deferred (later phases)
-> Not in scope for the current implementation.
+### Phase 8 — Log Format Migration 🔲 To do
+> Align `game.log` with the target format described in `docs/plan.md` (Logging section).
 
-- [ ] Partial observation — `view_radius` filtering in `get_state`
-- [ ] `state_hash` cross-engine validation via mutual-position-validation tool
-- [ ] Match setup handshake (seed, mechanics negotiation between two servers)
-- [ ] Scoring accumulation across 6 sub-games
-- [ ] Gmail reporting
-- [ ] Terminal log entry on game over (winner, win_reason, scores, rounds)
-- [ ] MCP prompts (role grounding) and resources (live state)
-- [ ] MCP API key authentication
+- [ ] Add `"type": "turn"` field to `append_log` entries in `persistence.py`
+- [ ] Add `"type": "terminal"` field to `append_terminal_log` entries
+- [ ] Add `append_setup_log(game_id, seed, mechanics, base)` — called by SDK on `new_game`
+- [ ] Add optional `message: str | None` param to SDK `submit_action` (wired through to log; always `None` until Part 2 fills it)
+- [ ] Update all affected tests
+
+---
+
+## Shared Infrastructure — Phase 9 🔲 To do
+> Cross-cutting pieces required before Parts 2–5.
+
+- [ ] Create `src/game/shared/gatekeeper.py` — rate-limited, retried LLM call wrapper
+  - [ ] Read limits from `config/rate_limits.json`
+  - [ ] Token-bucket or sliding-window rate limiting
+  - [ ] Exponential backoff on 429 / transient errors
+  - [ ] Log every call (model, tokens in/out, latency) → `docs/cost.md`
+- [ ] Create `config/rate_limits.json`
+- [ ] Create `config/setup.json`
+- [ ] Create `.env.example` documenting all env vars
+- [ ] Unit tests: `tests/unit/test_gatekeeper.py`
+
+---
+
+## Part 2 — Agent (NL Bridge) — Phase 10 🔲 To do
+> Renderer + parser + retry loop. No strategy logic.
+
+- [ ] `src/game/agent/renderer.py` — `ObservationState` → human-readable prompt text
+  - [ ] Include: round, role, position, opponent last seen, barriers, legal moves, opponent's last message
+- [ ] `src/game/agent/parser.py` — LLM free-text → `(action: str, message: str)` or `ParseError`
+  - [ ] Match action keyword from legal moves list
+  - [ ] Extract everything before the action keyword as the NL message
+- [ ] `src/game/agent/agent.py` — retry loop
+  - [ ] Render state → call Gatekeeper (LLM) → parse → submit_action
+  - [ ] Re-prompt up to `max_illegal_retries` on `ParseError` or illegal action
+  - [ ] After exhausting retries: forfeit turn (stay in place), write `forfeit` log entry
+  - [ ] Track consecutive forfeits → raise `TechnicalLoss` after `max_consecutive_forfeits`
+- [ ] `tests/unit/test_renderer.py`
+- [ ] `tests/unit/test_parser.py`
+- [ ] `tests/integration/test_agent_retry.py` — retry loop, forfeit escalation, technical loss
+
+---
+
+## Part 3 — MCP Server Hardening
+
+### Phase 11a — Inter-server Communication Tools 🔲 To do
+> Server-to-server HTTP — the two MCP servers talk to each other.
+
+- [ ] `src/game/wrappers/mcp_client.py` — HTTP client for calling opponent MCP server
+  - [ ] Read `OPPONENT_MCP_URL` from env
+  - [ ] Send `MCP_API_KEY` on all outbound requests
+- [ ] Add to `mcp_tools.py`:
+  - [ ] `propose_match(seed, mechanics, grid_size, my_role)` — initiate match handshake
+  - [ ] `accept_match(proposal_id)` — inbound: accept and initialize both engines
+  - [ ] `send_action(game_id, actor, action, message)` — push turn to opponent
+  - [ ] `receive_action(game_id, actor, action, message)` — inbound: apply to local engine
+  - [ ] `validate_state(game_id)` — cross-check game_hash with opponent
+- [ ] `tests/integration/test_inter_server.py` — two local servers, full handshake + game turn
+
+### Phase 11b — MCP Prompts & Resources 🔲 To do
+> LLM grounding via standard MCP surfaces.
+
+- [ ] `src/game/wrappers/mcp_prompts.py`
+  - [ ] `cop_rules(game_id)` — system prompt: win conditions, movement, barrier, turn order, NL message requirement
+  - [ ] `thief_rules(game_id)` — same rulebook, role differences called out
+- [ ] `src/game/wrappers/mcp_resources.py`
+  - [ ] `game://config` — active config (grid_size, max_moves, max_barriers, observability)
+  - [ ] `game://{game_id}/state/{actor}` — live `ObservationState`
+- [ ] `tests/unit/test_mcp_prompts.py`
+- [ ] `tests/unit/test_mcp_resources.py`
+
+### Phase 11c — API Key Authentication 🔲 To do
+> Every inbound request must carry a valid key from `MCP_ALLOWED_API_KEYS`.
+
+- [ ] `src/game/wrappers/mcp_auth.py` — middleware checking `X-API-Key` / `Authorization` header
+- [ ] Reject with 403 if key not in allowed set
+- [ ] `tests/integration/test_mcp_auth.py` — valid key passes, missing/wrong key rejected
+
+---
+
+## Part 4 — Gmail Reporting — Phase 12 🔲 To do
+> Plugin OFF by default. Activates only when `GMAIL_ENABLED=true` AND `GMAIL_RECIPIENT` are set.
+
+- [ ] `src/game/gmail/reporter.py` — `build_report(sub_games, report_type)` → dict (PRD §10 schema)
+  - [ ] Internal game shape (group_name, students, URLs, sub_games, totals)
+  - [ ] Bonus game shape (both groups, 4 URLs, totals_by_group, bonus_claim, mutual_agreement)
+  - [ ] Write `report.json` to `games/<match_id>/report.json`
+- [ ] `src/game/gmail/sender.py` — `send_report(report_dict)` via Gmail API
+  - [ ] Token-based OAuth2 (no username/password)
+  - [ ] Email body = only the JSON, no free text
+  - [ ] Dedup: check sent-flag before sending; re-runs for technical losses do not re-send
+- [ ] `src/game/gmail/gmail_plugin.py` — `is_enabled()` guard
+- [ ] `tests/unit/test_reporter.py` — output matches PRD §10 schema
+- [ ] `tests/unit/test_gmail_plugin.py` — off by default, on when both vars set
+- [ ] `tests/integration/test_sender.py` — mock Gmail API, no real email sent
+
+---
+
+## Part 5 — Actor (team-specific) — Phase 13 🔲 To do
+> Strategy brain. Each team implements their own. Not shared.
+
+- [ ] `src/actor/actor.py` — base interface: `decide(obs: ObservationState) → str`
+- [ ] `src/actor/heuristic.py` — simple heuristic (Manhattan distance cop, escape-maximizing thief)
+- [ ] Wire Actor into Agent retry loop as the LLM-call provider
+- [ ] Basic tests: actor returns a legal action for given observation
+
+---
+
+## Phase 14 — Deferred / Phase 8 🔲 To do (after Parts 2–5)
+> Needed for full production run; deferred until the pipeline is proven end-to-end.
+
+- [ ] Partial observation — `view_radius` (Chebyshev) filtering in `get_state`
+  - [ ] Opponent position hidden when outside `view_radius`
+  - [ ] Barriers outside radius hidden
+  - [ ] Hidden state must never leak into Actor
+- [ ] `state_hash` cross-engine validation after every turn (via `validate_state` tool)
+- [ ] Scoring accumulation across 6 sub-games (match-level state, not sub-game-level)
+- [ ] Full match orchestration loop:
+  - [ ] 6 sub-games, role alternation each sub-game
+  - [ ] Technical loss detection → void sub-game, re-run
+  - [ ] `max_consecutive_forfeits` → technical loss
+  - [ ] Shared `random_seed` for start positions
+- [ ] Deploy both MCP servers to cloud (e.g. Prefect) with public URLs
+- [ ] Bonus inter-group game support (3+3 role split, PRD §12)
