@@ -1,7 +1,7 @@
 """SDK entry point — single interface for all external callers (CLI, CrewAI, MCP).
 
-All callers load game state from disk, call one method, and save the result back.
-The Game object is stateless between calls; state lives in games/<game_id>/.
+All callers load state from disk, invoke one method, and save the result back.
+The Game object is stateless between calls; canonical state lives in games/<game_id>/.
 """
 
 from __future__ import annotations
@@ -9,8 +9,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from game.constants import COP
 from game.game import Game
-from game.persistence import append_log, generate_game_id, load_state, save_state
+from game.persistence import (
+    append_log,
+    append_terminal_log,
+    generate_game_id,
+    load_state,
+    save_state,
+)
 from game.state import ActionResult, ObservationState
 
 
@@ -48,22 +55,37 @@ def submit_action(
     action: str,
     games_base: Path | None = None,
 ) -> ActionResult:
-    """Load game, submit action, persist updated state, append log entry.
+    """Load game, submit action, persist state, and write log entry.
+
+    Appends a per-turn JSONL entry for every call (success or failure).
+    Appends a terminal summary entry when the game ends.
 
     Args:
         game_id: The game identifier.
         actor: "cop" or "thief".
-        action: Action string.
+        action: Action string (direction or BARRIER).
         games_base: Optional override for the games root directory.
 
     Returns:
         ActionResult dataclass.
     """
     game = load_state(game_id, games_base)
+
+    # Capture pre-action position for the log's "from" field.
+    from_pos = game._state.cop_pos if actor == COP else game._state.thief_pos
+
     result = game.submit_action(actor, action)
+
+    to_pos = (game._state.cop_pos if actor == COP else game._state.thief_pos)
+
     if result.success:
         save_state(game, games_base)
-    append_log(game_id, actor, action, result, base=games_base)
+
+    append_log(game_id, actor, action, result, from_pos, to_pos, game, base=games_base)
+
+    if result.game_over:
+        append_terminal_log(game_id, result, game, base=games_base)
+
     return result
 
 
@@ -78,9 +100,6 @@ def get_state(
         game_id: The game identifier.
         actor: "cop" or "thief".
         games_base: Optional override for the games root directory.
-
-    Returns:
-        ObservationState dataclass.
     """
     game = load_state(game_id, games_base)
     return game.get_state(actor)

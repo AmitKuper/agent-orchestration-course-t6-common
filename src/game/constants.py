@@ -34,3 +34,29 @@ WIN_THIEF_SURVIVED = "thief_survived"
 DEFAULT_GRID_SIZE: tuple[int, int] = (5, 5)
 DEFAULT_MAX_MOVES: int = 30
 DEFAULT_MAX_BARRIERS: int = 5
+
+# Scoring defaults (PRD §4 / §5)
+SCORE_COP_WIN: int = 20    # cop captures or thief_trapped
+SCORE_THIEF_WIN: int = 10  # thief survives or cop_trapped
+SCORE_COP_LOSS: int = 5    # cop's points when thief wins
+SCORE_THIEF_LOSS: int = 5  # thief's points when cop wins
+
+
+def compute_scores(winner: str, mechanics: dict) -> dict[str, int]:
+    """Return per-actor scores for this sub-game outcome.
+
+    Args:
+        winner: "cop" or "thief".
+        mechanics: Game mechanics dict (may contain a "scoring" sub-dict).
+
+    Returns:
+        Dict with "cop" and "thief" integer point values.
+    """
+    sc = mechanics.get("scoring", {})
+    cop_win = int(sc.get("cop_win", SCORE_COP_WIN))
+    thief_win = int(sc.get("thief_win", SCORE_THIEF_WIN))
+    cop_loss = int(sc.get("cop_loss", SCORE_COP_LOSS))
+    thief_loss = int(sc.get("thief_loss", SCORE_THIEF_LOSS))
+    if winner == COP:
+        return {"cop": cop_win, "thief": thief_loss}
+    return {"cop": cop_loss, "thief": thief_win}

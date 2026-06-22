@@ -4,3 +4,9 @@ max_barriers: 5
 default_cop_pos: [0, 0]
 default_thief_pos: [4, 4]
 games_dir: games
+
+scoring:
+  cop_win: 20     # cop captures or thief is trapped
+  thief_win: 10   # thief survives or cop is trapped
+  cop_loss: 5     # cop's points when thief wins
+  thief_loss: 5   # thief's points when cop wins

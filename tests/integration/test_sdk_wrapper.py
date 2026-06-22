@@ -133,5 +133,5 @@ def test_sdk_barrier_appears_in_log() -> None:
 
         sdk.submit_action(gid, "cop", "BARRIER", games_base=base)
         line = json.loads((base / gid / "game.log").read_text().strip())
-        assert line["action"] == "BARRIER"
+        assert line["action"] == "barrier"
         assert line["success"] is True
