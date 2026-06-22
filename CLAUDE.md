@@ -21,7 +21,8 @@ Always commit `uv.lock` alongside `pyproject.toml`. All dependencies declared in
 ## Linting & Quality
 
 - **Zero Ruff violations** required. Run: `uv run ruff check .`
-- Test coverage target: ≥ 85%. Run: `uv run pytest`
+- Test coverage target: ≥ 85%.
+- **Run tests via the project venv** — `uv run pytest` uses PYTHONPATH injection (not the venv interpreter), so fastmcp and other heavy deps may be missing. Use `.venv/Scripts/python.exe -m pytest` (Windows) or `.venv/bin/python -m pytest` (Linux/macOS) to get all 77 tests including MCP wrapper tests.
 - Single test file per module, under `unit/` and `integration/` folders.
 
 ## Code Rules (from `docs/rules.md`)

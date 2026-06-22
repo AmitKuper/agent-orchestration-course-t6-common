@@ -41,3 +41,9 @@ omit = ["src/game/wrappers/*", "src/game/sdk/*"]
 
 [tool.coverage.report]
 fail_under = 85
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+]
