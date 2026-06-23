@@ -69,66 +69,66 @@
 
 - [x] Register `new_game`, `submit_action`, `get_state`, `game_hash` as MCP tools
 
-### Phase 8 — Log Format Migration 🔲 To do
+### Phase 8 — Log Format Migration ✅ Complete (commit 89f2b25)
 > Align `game.log` with the target format described in `docs/plan.md` (Logging section).
 
-- [ ] Add `"type": "turn"` field to `append_log` entries in `persistence.py`
-- [ ] Add `"type": "terminal"` field to `append_terminal_log` entries
-- [ ] Add `append_setup_log(game_id, seed, mechanics, base)` — called by SDK on `new_game`
-- [ ] Add optional `message: str | None` param to SDK `submit_action` (wired through to log; always `None` until Part 2 fills it)
-- [ ] Update all affected tests
+- [x] Add `"type": "turn"` field to `append_log` entries in `persistence.py`
+- [x] Add `"type": "terminal"` field to `append_terminal_log` entries
+- [x] Add `append_setup_log(game_id, seed, mechanics, grid_size, cop_pos, thief_pos, base)` — called by SDK on `new_game`
+- [x] Add optional `message: str | None` param to SDK `submit_action` (wired through to log)
+- [x] Update all affected tests
 
 ---
 
-## Shared Infrastructure — Phase 9 🔲 To do
+## Shared Infrastructure — Phase 9 ✅ Complete (commit ce77955)
 > Cross-cutting pieces required before Parts 2–5.
 
-- [ ] Create `src/game/shared/gatekeeper.py` — rate-limited, retried LLM call wrapper
-  - [ ] Read limits from `config/rate_limits.json`
-  - [ ] Token-bucket or sliding-window rate limiting
-  - [ ] Exponential backoff on 429 / transient errors
-  - [ ] Log every call (model, tokens in/out, latency) → `docs/cost.md`
-- [ ] Create `config/rate_limits.json`
-- [ ] Create `config/setup.json`
-- [ ] Create `.env.example` documenting all env vars
-- [ ] Unit tests: `tests/unit/test_gatekeeper.py`
+- [x] Create `src/game/shared/gatekeeper.py` — rate-limited, retried LLM call wrapper
+  - [x] Read limits from `config/rate_limits.json`
+  - [x] Token-bucket / sliding-window rate limiting
+  - [x] Exponential backoff on 429 / transient errors
+  - [x] Log every call (model, tokens in/out, latency) → `docs/cost.md`
+- [x] Create `config/rate_limits.json`
+- [x] Create `config/setup.json`
+- [x] Create `.env.example` documenting all env vars
+- [x] Unit tests: `tests/unit/test_gatekeeper.py`
 
 ---
 
-## Part 2 — Agent (NL Bridge) — Phase 10 🔲 To do
+## Part 2 — Agent (NL Bridge) — Phase 10 ✅ Complete (commit 47dcc1c)
 > Renderer + parser + retry loop. No strategy logic.
 
-- [ ] `src/game/agent/renderer.py` — `ObservationState` → human-readable prompt text
-  - [ ] Include: round, role, position, opponent last seen, barriers, legal moves, opponent's last message
-- [ ] `src/game/agent/parser.py` — LLM free-text → `(action: str, message: str)` or `ParseError`
-  - [ ] Match action keyword from legal moves list
-  - [ ] Extract everything before the action keyword as the NL message
-- [ ] `src/game/agent/agent.py` — retry loop
-  - [ ] Render state → call Gatekeeper (LLM) → parse → submit_action
-  - [ ] Re-prompt up to `max_illegal_retries` on `ParseError` or illegal action
-  - [ ] After exhausting retries: forfeit turn (stay in place), write `forfeit` log entry
-  - [ ] Track consecutive forfeits → raise `TechnicalLoss` after `max_consecutive_forfeits`
-- [ ] `tests/unit/test_renderer.py`
-- [ ] `tests/unit/test_parser.py`
-- [ ] `tests/integration/test_agent_retry.py` — retry loop, forfeit escalation, technical loss
+- [x] `src/game/agent/renderer.py` — `ObservationState` → human-readable prompt text
+  - [x] Include: round, role, position, opponent last seen, barriers, legal moves, opponent's last message
+- [x] `src/game/agent/parser.py` — LLM free-text → `(action: str, message: str)` or `ParseError`
+  - [x] Match action keyword from legal moves list
+  - [x] Extract everything before the action keyword as the NL message
+- [x] `src/game/agent/agent.py` — retry loop
+  - [x] Render state → call Gatekeeper (LLM) → parse → submit_action
+  - [x] Re-prompt up to `max_illegal_retries` on `ParseError` or illegal action
+  - [x] After exhausting retries: forfeit turn (stay in place), write `forfeit` log entry
+  - [x] Track consecutive forfeits → raise `TechnicalLoss` after `max_consecutive_forfeits`
+- [x] `tests/unit/test_renderer.py`
+- [x] `tests/unit/test_parser.py`
+- [x] `tests/unit/test_agent.py` (retry loop, forfeit escalation, technical loss)
 
 ---
 
 ## Part 3 — MCP Server Hardening
 
-### Phase 11a — Inter-server Communication Tools 🔲 To do
+### Phase 11a — Inter-server Communication Tools ✅ Complete (commit 2d97a5c)
 > Server-to-server HTTP — the two MCP servers talk to each other.
 
-- [ ] `src/game/wrappers/mcp_client.py` — HTTP client for calling opponent MCP server
-  - [ ] Read `OPPONENT_MCP_URL` from env
-  - [ ] Send `MCP_API_KEY` on all outbound requests
-- [ ] Add to `mcp_tools.py`:
-  - [ ] `propose_match(seed, mechanics, grid_size, my_role)` — initiate match handshake
-  - [ ] `accept_match(proposal_id)` — inbound: accept and initialize both engines
-  - [ ] `send_action(game_id, actor, action, message)` — push turn to opponent
-  - [ ] `receive_action(game_id, actor, action, message)` — inbound: apply to local engine
-  - [ ] `validate_state(game_id)` — cross-check game_hash with opponent
-- [ ] `tests/integration/test_inter_server.py` — two local servers, full handshake + game turn
+- [x] `src/game/wrappers/mcp_client.py` — HTTP client for calling opponent MCP server
+  - [x] Read `OPPONENT_MCP_URL` from env
+  - [x] Send `MCP_API_KEY` on all outbound requests
+- [x] `mcp_routes.py` — custom REST routes registered on FastMCP instance:
+  - [x] `POST /game/propose_match` — accept match proposal, create local game
+  - [x] `POST /game/receive_action` — inbound: apply opponent's action to local engine
+  - [x] `POST /game/hash` — return local state hash for cross-validation
+- [x] `mcp_server.py` — `new_game_tool` + `take_turn` MCP tools; `_patch_state_game_id` fix
+- [x] `scripts/run_match.py` — async orchestrator using FastMCP `Client` with `BearerAuth`
+> Two-server match ran end-to-end: 28 rounds, cop captured thief, `hash_match: True` every turn (commit 24d222c)
 
 ### Phase 11b — MCP Prompts & Resources 🔲 To do
 > LLM grounding via standard MCP surfaces.
@@ -142,60 +142,58 @@
 - [ ] `tests/unit/test_mcp_prompts.py`
 - [ ] `tests/unit/test_mcp_resources.py`
 
-### Phase 11c — API Key Authentication 🔲 To do
+### Phase 11c — API Key Authentication ✅ Complete (commit 2d97a5c)
 > Every inbound request must carry a valid key from `MCP_ALLOWED_API_KEYS`.
 
-- [ ] `src/game/wrappers/mcp_auth.py` — middleware checking `X-API-Key` / `Authorization` header
-- [ ] Reject with 403 if key not in allowed set
-- [ ] `tests/integration/test_mcp_auth.py` — valid key passes, missing/wrong key rejected
+- [x] `src/game/wrappers/mcp_state.py` — `auth_ok(request)` checks `Authorization: Bearer` / `X-API-Key` header
+- [x] All routes in `mcp_routes.py` call `auth_ok`; reject with 403 if key not in allowed set
+- [x] `scripts/run_match.py` uses `BearerAuth` on all MCP tool calls
 
 ---
 
-## Part 4 — Gmail Reporting — Phase 12 🔲 To do
+## Part 4 — Gmail Reporting — Phase 12 ✅ Complete (commit 5c5c75c)
 > Plugin OFF by default. Activates only when `GMAIL_ENABLED=true` AND `GMAIL_RECIPIENT` are set.
 
-- [ ] `src/game/gmail/reporter.py` — `build_report(sub_games, report_type)` → dict (PRD §10 schema)
-  - [ ] Internal game shape (group_name, students, URLs, sub_games, totals)
-  - [ ] Bonus game shape (both groups, 4 URLs, totals_by_group, bonus_claim, mutual_agreement)
-  - [ ] Write `report.json` to `games/<match_id>/report.json`
-- [ ] `src/game/gmail/sender.py` — `send_report(report_dict)` via Gmail API
-  - [ ] Token-based OAuth2 (no username/password)
-  - [ ] Email body = only the JSON, no free text
-  - [ ] Dedup: check sent-flag before sending; re-runs for technical losses do not re-send
-- [ ] `src/game/gmail/gmail_plugin.py` — `is_enabled()` guard
-- [ ] `tests/unit/test_reporter.py` — output matches PRD §10 schema
-- [ ] `tests/unit/test_gmail_plugin.py` — off by default, on when both vars set
-- [ ] `tests/integration/test_sender.py` — mock Gmail API, no real email sent
+- [x] `src/game/gmail/reporter.py` — `build_report(sub_games, report_type)` → dict (PRD §10 schema)
+  - [x] Internal game shape (group_name, students, URLs, sub_games, totals)
+  - [x] Bonus game shape (both groups, 4 URLs, totals_by_group, bonus_claim, mutual_agreement)
+  - [x] Write `report.json` to `games/<match_id>/report.json`
+- [x] `src/game/gmail/sender.py` — `send_report(report_dict)` via Gmail API
+  - [x] Token-based OAuth2 (no username/password)
+  - [x] Email body = only the JSON, no free text
+  - [x] Dedup: check sent-flag before sending; re-runs for technical losses do not re-send
+- [x] `src/game/gmail/gmail_plugin.py` — `is_enabled()` guard
+- [x] `tests/unit/test_reporter.py` — output matches PRD §10 schema
+- [x] `tests/unit/test_gmail_plugin.py` — off by default, on when both vars set
 
 ---
 
-## Part 5 — Actor — Phase 13 🔲 To do
+## Part 5 — Actor — Phase 13 ✅ Complete (commit 8dbee63)
 > ActorWrapper + RandomActorBackend (default) + RLActorBackend stub (interface only).
 > The Agent calls ActorWrapper.get_action(obs) → (action, message). It never calls a backend directly.
 
-- [ ] `src/actor/base_actor.py` — `BaseActor` ABC: `get_action(obs) → str`, `on_result(obs, action, result)` (default no-op)
-- [ ] `src/actor/actor_wrapper.py` — `ActorWrapper`: calls `backend.get_action()`, generates NL message from template, exposes `on_result()` passthrough
-- [ ] `src/actor/random_actor.py` — `RandomActorBackend`: `random.choice(obs.legal_moves)`; `on_result` is no-op
-- [ ] `src/actor/rl_actor.py` — `RLActorBackend` stub: `get_action` and `on_result` raise `NotImplementedError`; internals come from a separate repo
-- [ ] Wire `ActorWrapper` into `Agent` — Agent calls `wrapper.get_action(obs)` and `wrapper.on_result(obs, action, result)` after each turn
-- [ ] `tests/unit/test_actor_wrapper.py` — wrapper returns `(action, message)` tuple; delegates to backend; message is non-empty string
-- [ ] `tests/unit/test_random_actor.py` — always returns a value from `obs.legal_moves`; no errors on any legal observation
+- [x] `src/actor/base_actor.py` — `BaseActor` ABC: `get_action(obs) → str`, `on_result(obs, action, result)` (default no-op)
+- [x] `src/actor/actor_wrapper.py` — `ActorWrapper`: calls `backend.get_action()`, generates NL message from template, exposes `on_result()` passthrough
+- [x] `src/actor/random_actor.py` — `RandomActorBackend`: `random.choice(obs.legal_moves)`; `on_result` is no-op
+- [x] `src/actor/rl_actor.py` — `RLActorBackend` stub: `get_action` and `on_result` raise `NotImplementedError`
+- [x] `ActorWrapper` wired into `take_turn` MCP tool in `mcp_server.py`
+- [x] `tests/unit/test_actor.py` — wrapper returns `(action, message)` tuple; delegates to backend
 
 ---
 
-## Phase 14 — Deferred / Phase 8 🔲 To do (after Parts 2–5)
+## Phase 14 — Production Hardening 🚧 In Progress
 > Needed for full production run; deferred until the pipeline is proven end-to-end.
 
+- [x] `state_hash` cross-engine validation after every turn — `hash_match` checked in `take_turn`
+- [x] Shared `random_seed` for start positions — agreed at match setup via `propose_match`
 - [ ] Partial observation — `view_radius` (Chebyshev) filtering in `get_state`
   - [ ] Opponent position hidden when outside `view_radius`
   - [ ] Barriers outside radius hidden
   - [ ] Hidden state must never leak into Actor
-- [ ] `state_hash` cross-engine validation after every turn (via `validate_state` tool)
 - [ ] Scoring accumulation across 6 sub-games (match-level state, not sub-game-level)
 - [ ] Full match orchestration loop:
   - [ ] 6 sub-games, role alternation each sub-game
   - [ ] Technical loss detection → void sub-game, re-run
   - [ ] `max_consecutive_forfeits` → technical loss
-  - [ ] Shared `random_seed` for start positions
 - [ ] Deploy both MCP servers to cloud (e.g. Prefect) with public URLs
 - [ ] Bonus inter-group game support (3+3 role split, PRD §12)
