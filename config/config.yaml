@@ -1,5 +1,5 @@
 grid_size: [5, 5]
-max_moves: 30
+max_moves: 25
 max_barriers: 5
 default_cop_pos: [0, 0]
 default_thief_pos: [4, 4]
