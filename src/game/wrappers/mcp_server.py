@@ -19,14 +19,20 @@ from game.sdk.sdk import get_state as sdk_get_state
 from game.sdk.sdk import new_game as sdk_new_game
 from game.sdk.sdk import state_hash as sdk_hash
 from game.sdk.sdk import submit_action as sdk_submit_action
+from game.wrappers.mcp_agent_tools import register_agent_tools
+from game.wrappers.mcp_prompts import register_prompts
+from game.wrappers.mcp_resources import register_resources
 from game.wrappers.mcp_routes import _patch_state_game_id, register_routes
 from game.wrappers.mcp_state import games_base, server_state
 
 mcp = FastMCP(
     name="cop-thief-game",
-    instructions="Cop & Thief game engine. Use take_turn to advance the game.",
+    instructions="Cop & Thief game engine. Use get_state then take_action to play.",
 )
 register_routes(mcp)
+register_agent_tools(mcp)
+register_prompts(mcp)
+register_resources(mcp)
 
 
 def _create_actor_wrapper(role: str) -> object:

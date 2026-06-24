@@ -145,17 +145,39 @@
 - [x] `tests/unit/test_llm_actor.py` — 12 tests covering backend, wrapper, factory, fallback
 - [x] `tests/unit/test_gatekeeper.py` — added Ollama tests (backend selection, call, system prompt)
 
-### Phase 11b — MCP Prompts & Resources 🔲 To do
+### Phase 11b — MCP Prompts & Resources ✅ Complete
 > LLM grounding via standard MCP surfaces.
 
-- [ ] `src/game/wrappers/mcp_prompts.py`
-  - [ ] `cop_rules(game_id)` — system prompt: win conditions, movement, barrier, turn order, NL message requirement
-  - [ ] `thief_rules(game_id)` — same rulebook, role differences called out
-- [ ] `src/game/wrappers/mcp_resources.py`
-  - [ ] `game://config` — active config (grid_size, max_moves, max_barriers, observability)
-  - [ ] `game://{game_id}/state/{actor}` — live `ObservationState`
-- [ ] `tests/unit/test_mcp_prompts.py`
-- [ ] `tests/unit/test_mcp_resources.py`
+- [x] `src/game/wrappers/mcp_prompts.py`
+  - [x] `cop_rules(game_id)` — system prompt: win conditions, movement, barrier, turn order, NL message requirement
+  - [x] `thief_rules(game_id)` — same rulebook, role differences called out
+- [x] `src/game/wrappers/mcp_resources.py`
+  - [x] `game://config` — active config (grid_size, max_moves, max_barriers, observability)
+  - [x] `game://{game_id}/state/{actor}` — live `ObservationState`
+- [x] `tests/unit/test_mcp_prompts.py`
+- [x] `tests/unit/test_mcp_resources.py`
+
+### Phase 11d — LLM Tool-Use Orchestrator ✅ Complete
+> LLM lives in the orchestrator (`run_match.py`), not inside the server. Matches PRD architecture.
+
+- [x] `src/game/shared/mcp_tool_format.py`
+  - [x] `ToolCall` / `LLMResponse` dataclasses
+  - [x] `to_anthropic_tools()` / `to_ollama_tools()` — unified → wire format conversion
+  - [x] `parse_anthropic_response()` / `parse_ollama_response()`
+  - [x] `anthropic_tool_result_messages()` / `ollama_tool_result_messages()`
+- [x] `src/game/shared/tool_caller.py` — `ToolCaller` class
+  - [x] `call_with_tools(messages, tools, tool_executor, system)` — async tool-use loop
+  - [x] Internal `_raw_call()` using Gatekeeper's rate-limit; `_call_anthropic()` / `_call_ollama()`
+- [x] `src/game/wrappers/mcp_agent_tools.py`
+  - [x] `GAME_TOOLS` list — tool defs for `get_state` and `take_action`
+  - [x] `register_agent_tools(mcp)` — registers `get_state` + `take_action` MCP tools
+- [x] `src/game/wrappers/mcp_server.py` — `register_agent_tools`, `register_prompts`, `register_resources` added
+- [x] `scripts/run_match.py` — rewritten: `ToolCaller` drives LLM that calls `get_state` then `take_action`
+- [x] `tests/unit/test_mcp_tool_format.py` — 11 tests
+- [x] `tests/unit/test_tool_caller.py` — 5 tests
+- [x] `tests/unit/test_mcp_agent_tools.py` — 7 tests
+> Tests: 185 passed | Ruff: 0 violations
+> End-to-end game run (seed=77): cop captured thief in 2 rounds, hash_match=True all turns (llama3.1:8b vs llama3.1:8b)
 
 ### Phase 11c — API Key Authentication ✅ Complete (commit 2d97a5c)
 > Every inbound request must carry a valid key from `MCP_ALLOWED_API_KEYS`.
