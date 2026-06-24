@@ -21,10 +21,12 @@ import time
 from pathlib import Path
 
 import httpx
+from dotenv import load_dotenv
 from fastmcp import Client
 from fastmcp.client.auth.bearer import BearerAuth
 
 _REPO_ROOT = Path(__file__).parent.parent
+load_dotenv(_REPO_ROOT / ".env")
 _API_KEY = os.environ.get("MCP_API_KEY", "demo-key")
 
 _SYSTEM_COP = (
