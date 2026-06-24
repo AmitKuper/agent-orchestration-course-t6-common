@@ -166,9 +166,10 @@ class Gatekeeper:
         response = httpx.post(self._ollama_url, json=payload, timeout=120.0)
         response.raise_for_status()
         data = response.json()
-        usage = data.get("usage", {})
+        # Ollama returns prompt_eval_count / eval_count (not openai-style usage)
+        in_tok = data.get("prompt_eval_count", "?")
+        out_tok = data.get("eval_count", "?")
         print(  # noqa: T201
-            f"[gatekeeper] model={self.model} (ollama)"
-            f" in={usage.get('prompt_tokens', '?')} out={usage.get('completion_tokens', '?')}"
+            f"[gatekeeper] model={self.model} (ollama) in={in_tok} out={out_tok}"
         )
         return data["message"]["content"]

@@ -106,9 +106,7 @@ async def _async_main(seed: int, max_rounds: int) -> None:
              "MCP_API_KEY": _API_KEY, "MCP_ALLOWED_API_KEYS": _API_KEY}
     env_b = {**os.environ, "OPPONENT_MCP_URL": "http://localhost:8001",
              "MCP_API_KEY": _API_KEY, "MCP_ALLOWED_API_KEYS": _API_KEY}
-    python = str(_REPO_ROOT / ".venv" /
-                 ("Scripts" if sys.platform == "win32" else "bin") /
-                 ("python.exe" if sys.platform == "win32" else "python"))
+    python = sys.executable
 
     proc_a, proc_b = _start_servers(env_a, env_b, python)
     url_a, url_b = "http://localhost:8001", "http://localhost:8002"
