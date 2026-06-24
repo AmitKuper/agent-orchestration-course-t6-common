@@ -130,6 +130,29 @@ async def _agent_turn(
     return last_result
 
 
+async def _actor_game_loop(
+    url_a: str, url_b: str, game_id: str, max_rounds: int,
+) -> None:
+    """Drive turns by calling take_turn on each server (actor decides, no LLM)."""
+    auth = BearerAuth(_API_KEY)
+    async with Client(url_a + "/mcp", auth=auth) as ca, \
+               Client(url_b + "/mcp", auth=auth) as cb:
+        game_over, round_num = False, 0
+        while not game_over and round_num < max_rounds:
+            round_num += 1
+            print(f"\n[round {round_num}]")
+            for client, actor in [(ca, "thief"), (cb, "cop")]:
+                tool_result = await client.call_tool(
+                    "take_turn", {"game_id": game_id, "actor": actor}
+                )
+                text = tool_result.content[0].text if tool_result.content else "{}"
+                result = json.loads(text)
+                print(f"  {actor}: {result}")
+                if result.get("game_over"):
+                    game_over = True
+                    break
+
+
 async def _game_loop(
     url_a: str, url_b: str, game_id: str, max_rounds: int,
 ) -> None:
@@ -158,22 +181,37 @@ async def _game_loop(
                     break
 
 
-async def _async_main(seed: int, max_rounds: int) -> None:
-    """Start servers, propose match, run LLM tool-use game loop, stop servers."""
+async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
+                      models_dir: str) -> None:
+    """Start servers, propose match, run game loop, stop servers."""
     grid = (5, 5)
     cop_pos, thief_pos = _derive_positions(seed, grid)
     game_id = f"match{seed:04d}"
-    print(f"[match] seed={seed} game_id={game_id} cop={cop_pos} thief={thief_pos}")
+    print(f"[match] seed={seed} game_id={game_id} cop={cop_pos} thief={thief_pos} mode={mode}")
 
     env_a = {**os.environ, "OPPONENT_MCP_URL": "http://localhost:8002",
              "MCP_API_KEY": _API_KEY, "MCP_ALLOWED_API_KEYS": _API_KEY}
     env_b = {**os.environ, "OPPONENT_MCP_URL": "http://localhost:8001",
              "MCP_API_KEY": _API_KEY, "MCP_ALLOWED_API_KEYS": _API_KEY}
 
+    if mode == "actor":
+        mdir = Path(models_dir)
+        # Expose parent repo's src/ so actor_t6 is importable in server subprocesses.
+        parent_src = str(_REPO_ROOT.parent / "src")
+        existing_pypath = os.environ.get("PYTHONPATH", "")
+        extra_pypath = parent_src + (os.pathsep + existing_pypath if existing_pypath else "")
+        # server_a plays thief; server_b plays cop
+        env_a = {**env_a, "ACTOR_CLASS": actor_class,
+                 "ACTOR_TABLE": str(mdir / "thief_qtable.npy"),
+                 "PYTHONPATH": extra_pypath}
+        env_b = {**env_b, "ACTOR_CLASS": actor_class,
+                 "ACTOR_TABLE": str(mdir / "cop_qtable.npy"),
+                 "PYTHONPATH": extra_pypath}
+
     proc_a, proc_b = _start_servers(env_a, env_b, sys.executable)
     url_a, url_b = "http://localhost:8001", "http://localhost:8002"
     try:
-        print("[match] waiting for servers…")
+        print("[match] waiting for servers...")
         _wait_for_server(url_a)
         _wait_for_server(url_b)
         print("[match] both servers up")
@@ -184,7 +222,10 @@ async def _async_main(seed: int, max_rounds: int) -> None:
         _post(url_b, "/game/propose_match", proposal)
         _post(url_a, "/game/propose_match", {**proposal, "my_role": "thief"})
 
-        await _game_loop(url_a, url_b, game_id, max_rounds)
+        if mode == "actor":
+            await _actor_game_loop(url_a, url_b, game_id, max_rounds)
+        else:
+            await _game_loop(url_a, url_b, game_id, max_rounds)
 
         log_a = Path("games/server_a") / game_id / "game.log"
         log_b = Path("games/server_b") / game_id / "game.log"
@@ -202,8 +243,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=random.randint(0, 9999))
     parser.add_argument("--max-rounds", type=int, default=30)
+    parser.add_argument("--mode", choices=["llm", "actor"], default="llm",
+                        help="llm: LLM tool-use loop; actor: Q-table actor via take_turn")
+    parser.add_argument("--actor-class", default="actor_t6.qtable_actor.QTableActor",
+                        help="Dotted class path for ACTOR_CLASS (actor mode only)")
+    parser.add_argument("--models-dir", default="models",
+                        help="Directory containing cop_qtable.npy / thief_qtable.npy")
     args = parser.parse_args()
-    asyncio.run(_async_main(args.seed, args.max_rounds))
+    asyncio.run(_async_main(args.seed, args.max_rounds, args.mode,
+                            args.actor_class, args.models_dir))
 
 
 if __name__ == "__main__":

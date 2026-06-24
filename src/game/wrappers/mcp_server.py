@@ -36,10 +36,12 @@ register_resources(mcp)
 
 
 def _create_actor_wrapper(role: str) -> object:
-    """Return an LLMActorWrapper when LLM env vars are set, else a RandomActorBackend wrapper.
+    """Return an actor wrapper based on env-var priority.
 
-    Uses ANTHROPIC_API_KEY (Anthropic) or OLLAMA_BASE_URL (Ollama) as the signal.
-    Falls back to the random actor so the server works without any API key configured.
+    Priority:
+      1. ACTOR_CLASS=<module>.<ClassName> — dynamically import and wrap that BaseActor subclass.
+      2. ANTHROPIC_API_KEY or OLLAMA_BASE_URL — LLMActorWrapper.
+      3. Fallback — RandomActorBackend.
 
     Args:
         role: "cop" or "thief".
@@ -47,6 +49,21 @@ def _create_actor_wrapper(role: str) -> object:
     Returns:
         An ActorWrapper-compatible object with get_action(obs) -> (action, message).
     """
+    actor_class_path = os.environ.get("ACTOR_CLASS")
+    if actor_class_path:
+        import importlib
+        module_path, class_name = actor_class_path.rsplit(".", 1)
+        actor_cls = getattr(importlib.import_module(module_path), class_name)
+        table_path = os.environ.get("ACTOR_TABLE")
+        if table_path and hasattr(actor_cls, "load"):
+            actor = actor_cls.load(role=role, path=table_path)
+        else:
+            try:
+                actor = actor_cls(role=role)
+            except TypeError:
+                actor = actor_cls()
+        from actor.actor_wrapper import ActorWrapper
+        return ActorWrapper(actor, role=role)
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OLLAMA_BASE_URL"):
         from actor.llm_actor import create_llm_wrapper
         return create_llm_wrapper(role)
@@ -60,19 +77,7 @@ def new_game_tool(
     game_id: str, cop_col: int, cop_row: int,
     thief_col: int, thief_row: int, seed: int,
 ) -> str:
-    """Create a new game with pre-agreed positions (called after match setup).
-
-    Args:
-        game_id: The agreed game identifier.
-        cop_col: Cop starting column.
-        cop_row: Cop starting row.
-        thief_col: Thief starting column.
-        thief_row: Thief starting row.
-        seed: The shared random seed (logged only).
-
-    Returns:
-        JSON {"game_id": "<id>"}.
-    """
+    """Create a new game with pre-agreed positions (called after match setup)."""
     try:
         result = sdk_new_game(
             grid_size=(5, 5),
@@ -94,18 +99,7 @@ def new_game_tool(
 
 @mcp.tool()
 def take_turn(game_id: str, actor: str) -> str:
-    """Decide and submit one turn using the local ActorWrapper.
-
-    Gets state, calls the actor for (action, message), submits locally,
-    forwards the action to the opponent server, and validates hash.
-
-    Args:
-        game_id: The active game identifier.
-        actor: "cop" or "thief".
-
-    Returns:
-        JSON ActionResult extended with "hash_match" boolean.
-    """
+    """Decide and submit one turn: get state, call actor, submit, forward, validate hash."""
     from game.wrappers.mcp_client import fetch_hash, send_receive_action
 
     try:
