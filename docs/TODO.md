@@ -130,6 +130,21 @@
 - [x] `scripts/run_match.py` — async orchestrator using FastMCP `Client` with `BearerAuth`
 > Two-server match ran end-to-end: 28 rounds, cop captured thief, `hash_match: True` every turn (commit 24d222c)
 
+### Phase 11b.5 — LLM-Backed Actor ✅ Complete
+> Wire an actual LLM into the game flow. Backend selected by env vars; fallback to random actor.
+
+- [x] `src/game/shared/gatekeeper.py` — add Ollama backend alongside Anthropic
+  - [x] `ANTHROPIC_API_KEY` set → Anthropic; otherwise → Ollama (`OLLAMA_BASE_URL`, default localhost)
+  - [x] `_call_anthropic()` / `_call_ollama()` split into private methods
+  - [x] `_default_model()` helper returns correct model per backend
+- [x] `src/actor/llm_actor.py` — new module
+  - [x] `LLMActorBackend(BaseActor)` — renders obs → calls Gatekeeper → parses response; stores NL message
+  - [x] `LLMActorWrapper(ActorWrapper)` — overrides `_render_message` to use LLM message not template
+  - [x] `create_llm_wrapper(role)` — factory reading `ANTHROPIC_API_KEY` / `OLLAMA_BASE_URL` / `LLM_MODEL`
+- [x] `src/game/wrappers/mcp_server.py` — `_create_actor_wrapper(role)` factory; uses LLM when env configured
+- [x] `tests/unit/test_llm_actor.py` — 12 tests covering backend, wrapper, factory, fallback
+- [x] `tests/unit/test_gatekeeper.py` — added Ollama tests (backend selection, call, system prompt)
+
 ### Phase 11b — MCP Prompts & Resources 🔲 To do
 > LLM grounding via standard MCP surfaces.
 
