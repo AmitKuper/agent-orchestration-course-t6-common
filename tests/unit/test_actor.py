@@ -16,6 +16,14 @@ def _obs(**kwargs: object) -> ObservationState:
     return ObservationState(**{**defaults, **kwargs})
 
 
+class _ConcreteWrapper(ActorWrapper):
+    """Minimal concrete ActorWrapper for testing — returns a fixed message."""
+
+    def _render_message(self, obs: ObservationState, action: str) -> str:
+        """Return a fixed test message."""
+        return f"test:{action}"
+
+
 # ── RandomActorBackend ────────────────────────────────────────────────────────
 
 def test_random_actor_returns_legal_move() -> None:
@@ -38,46 +46,35 @@ def test_random_actor_on_result_is_noop() -> None:
     """on_result does not raise (default no-op inherited from BaseActor)."""
     obs = _obs()
     result = ActionResult(success=True, error=None, game_over=False, winner=None, win_reason=None)
-    RandomActorBackend(seed=1).on_result(obs, "E", result)  # should not raise
+    RandomActorBackend(seed=1).on_result(obs, "E", result)
 
 
 # ── ActorWrapper ──────────────────────────────────────────────────────────────
 
 def test_wrapper_returns_action_and_message() -> None:
     """get_action returns (action_str, nl_message) pair."""
-    backend = RandomActorBackend(seed=0)
-    wrapper = ActorWrapper(backend, role="cop")
-    obs = _obs(legal_moves=["E"])
-    action, message = wrapper.get_action(obs)
+    wrapper = _ConcreteWrapper(RandomActorBackend(seed=0), role="cop")
+    action, message = wrapper.get_action(_obs(legal_moves=["E"]))
     assert action == "E"
-    assert isinstance(message, str)
-    assert len(message) > 0
+    assert message == "test:E"
 
 
-def test_wrapper_message_contains_destination_for_move() -> None:
-    """Move message includes destination coordinates."""
+def test_wrapper_render_message_must_be_overridden() -> None:
+    """Base ActorWrapper._render_message raises NotImplementedError."""
     backend = MagicMock()
     backend.get_action.return_value = "E"
     wrapper = ActorWrapper(backend, role="cop")
-    obs = _obs(my_pos=(1, 2), legal_moves=["E"])
-    _, message = wrapper.get_action(obs)
-    assert "[2, 2]" in message  # E moves x+1
-
-
-def test_wrapper_barrier_message() -> None:
-    """BARRIER action produces a barrier-specific message."""
-    backend = MagicMock()
-    backend.get_action.return_value = "BARRIER"
-    wrapper = ActorWrapper(backend, role="cop")
-    obs = _obs(my_pos=(3, 3), legal_moves=["BARRIER"])
-    _, message = wrapper.get_action(obs)
-    assert "barrier" in message.lower()
+    try:
+        wrapper.get_action(_obs(legal_moves=["E"]))
+        assert False, "expected NotImplementedError"
+    except NotImplementedError:
+        pass
 
 
 def test_wrapper_on_result_delegates_to_backend() -> None:
     """on_result passes through to backend.on_result."""
     backend = MagicMock()
-    wrapper = ActorWrapper(backend, role="thief")
+    wrapper = _ConcreteWrapper(backend, role="thief")
     obs = _obs()
     result = ActionResult(success=True, error=None, game_over=False, winner=None, win_reason=None)
     wrapper.on_result(obs, "N", result)

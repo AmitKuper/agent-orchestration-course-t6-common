@@ -71,17 +71,13 @@ class LLMActorBackend(BaseActor):
     def get_action(self, obs: ObservationState) -> str:
         """Query the LLM and return a legal action string.
 
-        Builds a multi-turn conversation: initial prompt, then clarification
-        requests on each ParseError. Raises ParseError if all attempts fail.
+        Retries up to max_retries times on ParseError; raises ParseError on exhaustion.
 
         Args:
             obs: Current ObservationState from the game engine.
 
         Returns:
             A legal action string from obs.legal_moves.
-
-        Raises:
-            ParseError: If the LLM fails to produce a valid action after all retries.
         """
         from game.agent.parser import ParseError, parse_response
         from game.agent.renderer import render_observation
@@ -130,24 +126,13 @@ class LLMActorWrapper(ActorWrapper):
         super().__init__(backend, role)
 
     def _render_message(self, obs: ObservationState, action: str) -> str:
-        """Return the LLM's NL message in place of the default template.
-
-        Args:
-            obs: Current observation (unused; message comes from LLM).
-            action: Chosen action (unused; message comes from LLM).
-
-        Returns:
-            The NL message captured from the LLM response.
-        """
+        """Return the LLM's NL message (captured during get_action)."""
         backend = cast(LLMActorBackend, self._backend)
         return backend.last_message
 
 
 def create_llm_wrapper(role: str) -> LLMActorWrapper:
-    """Factory: build an LLMActorWrapper from environment configuration.
-
-    Reads ANTHROPIC_API_KEY (Anthropic) or OLLAMA_BASE_URL (Ollama) to select
-    the backend. Optionally reads LLM_MODEL to override the default model.
+    """Factory: build an LLMActorWrapper from env vars (ANTHROPIC_API_KEY / OLLAMA_BASE_URL).
 
     Args:
         role: "cop" or "thief".

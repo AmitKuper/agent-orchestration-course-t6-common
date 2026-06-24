@@ -49,9 +49,15 @@ def _create_actor_wrapper(role: str) -> object:
     Returns:
         An ActorWrapper-compatible object with get_action(obs) -> (action, message).
     """
+    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OLLAMA_BASE_URL")):
+        raise RuntimeError(
+            "No LLM configured. Set ANTHROPIC_API_KEY (Anthropic) or OLLAMA_BASE_URL (Ollama)."
+        )
     actor_class_path = os.environ.get("ACTOR_CLASS")
     if actor_class_path:
-        import importlib
+        import importlib  # noqa: PLC0415
+
+        from actor.llm_message_wrapper import create_llm_message_wrapper
         module_path, class_name = actor_class_path.rsplit(".", 1)
         actor_cls = getattr(importlib.import_module(module_path), class_name)
         table_path = os.environ.get("ACTOR_TABLE")
@@ -62,14 +68,9 @@ def _create_actor_wrapper(role: str) -> object:
                 actor = actor_cls(role=role)
             except TypeError:
                 actor = actor_cls()
-        from actor.actor_wrapper import ActorWrapper
-        return ActorWrapper(actor, role=role)
-    if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OLLAMA_BASE_URL"):
-        from actor.llm_actor import create_llm_wrapper
-        return create_llm_wrapper(role)
-    from actor.actor_wrapper import ActorWrapper
-    from actor.random_actor import RandomActorBackend
-    return ActorWrapper(RandomActorBackend(), role=role)
+        return create_llm_message_wrapper(actor, role)
+    from actor.llm_actor import create_llm_wrapper
+    return create_llm_wrapper(role)
 
 
 @mcp.tool()
