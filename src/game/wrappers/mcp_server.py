@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 from dataclasses import asdict
 from pathlib import Path
@@ -26,6 +27,26 @@ mcp = FastMCP(
     instructions="Cop & Thief game engine. Use take_turn to advance the game.",
 )
 register_routes(mcp)
+
+
+def _create_actor_wrapper(role: str) -> object:
+    """Return an LLMActorWrapper when LLM env vars are set, else a RandomActorBackend wrapper.
+
+    Uses ANTHROPIC_API_KEY (Anthropic) or OLLAMA_BASE_URL (Ollama) as the signal.
+    Falls back to the random actor so the server works without any API key configured.
+
+    Args:
+        role: "cop" or "thief".
+
+    Returns:
+        An ActorWrapper-compatible object with get_action(obs) -> (action, message).
+    """
+    if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OLLAMA_BASE_URL"):
+        from actor.llm_actor import create_llm_wrapper
+        return create_llm_wrapper(role)
+    from actor.actor_wrapper import ActorWrapper
+    from actor.random_actor import RandomActorBackend
+    return ActorWrapper(RandomActorBackend(), role=role)
 
 
 @mcp.tool()
@@ -79,13 +100,11 @@ def take_turn(game_id: str, actor: str) -> str:
     Returns:
         JSON ActionResult extended with "hash_match" boolean.
     """
-    from actor.actor_wrapper import ActorWrapper
-    from actor.random_actor import RandomActorBackend
     from game.wrappers.mcp_client import fetch_hash, send_receive_action
 
     try:
         obs = sdk_get_state(game_id, actor, games_base())
-        wrapper = ActorWrapper(RandomActorBackend(), role=actor)
+        wrapper = _create_actor_wrapper(actor)
         action, message = wrapper.get_action(obs)
         result = sdk_submit_action(game_id, actor, action,
                                    message=message, games_base=games_base())
