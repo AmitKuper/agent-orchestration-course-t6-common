@@ -108,6 +108,79 @@ def load(cls, role: str, path, **kwargs) -> "MyActor":
 
 ---
 
+## Actor Code Outside This Repo
+
+Your actor lives in your **team's private repo**, not in `hw6-common`. The server loads it at runtime via `ACTOR_CLASS` — as long as the class is importable when the server process starts.
+
+### Package layout (team repo)
+
+```
+my-team-repo/
+├── src/
+│   └── actor_t6/           # your package name
+│       ├── __init__.py
+│       ├── qtable_actor.py  # contains MyActor(BaseActor)
+│       └── ...
+├── models/
+│   ├── cop_qtable.npy
+│   └── thief_qtable.npy
+└── hw6-common/             # git submodule
+```
+
+### Making it importable: `PYTHONPATH`
+
+The server subprocess must be able to `import actor_t6`. Add your `src/` directory to `PYTHONPATH`:
+
+```bash
+# Linux / macOS
+export PYTHONPATH=/path/to/my-team-repo/src:$PYTHONPATH
+
+# PowerShell
+$env:PYTHONPATH = "C:\path\to\my-team-repo\src;" + $env:PYTHONPATH
+```
+
+**If you use `run_match.py --mode actor`** this is done for you automatically — the script detects that `hw6-common` is a submodule and injects the parent repo's `src/` into `PYTHONPATH` for both server subprocesses.
+
+### Full example (team repo structure)
+
+```
+ACTOR_CLASS=actor_t6.qtable_actor.QTableActor
+ACTOR_TABLE=models/cop_qtable.npy
+```
+
+```bash
+# from hw6-common/
+uv run python scripts/run_match.py \
+    --mode actor \
+    --actor-class actor_t6.qtable_actor.QTableActor \
+    --models-dir ../models \
+    --seed 42
+```
+
+`run_match.py` automatically adds `../src` (the parent repo's `src/`) to `PYTHONPATH`, so `actor_t6` is found without any manual path setup.
+
+### Running servers manually (without `run_match.py`)
+
+If you start the MCP servers yourself, set `PYTHONPATH` before launching:
+
+```bash
+# server A (thief)
+PYTHONPATH=/path/to/my-team-repo/src \
+ACTOR_CLASS=actor_t6.qtable_actor.QTableActor \
+ACTOR_TABLE=/path/to/models/thief_qtable.npy \
+OLLAMA_BASE_URL=http://localhost:11434 \
+uv run python -m game.wrappers.mcp_server --port 8001 --games-dir games/server_a
+
+# server B (cop)
+PYTHONPATH=/path/to/my-team-repo/src \
+ACTOR_CLASS=actor_t6.qtable_actor.QTableActor \
+ACTOR_TABLE=/path/to/models/cop_qtable.npy \
+OLLAMA_BASE_URL=http://localhost:11434 \
+uv run python -m game.wrappers.mcp_server --port 8002 --games-dir games/server_b
+```
+
+---
+
 ## Wiring Your Actor into the Server
 
 The server selects an actor via **environment variables** — no code changes needed.
