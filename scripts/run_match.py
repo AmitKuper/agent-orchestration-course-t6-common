@@ -1,13 +1,12 @@
 """Orchestrate a full 6-sub-game series between two local MCP servers.
 
 Architecture (PRD §6): the LLM lives in this orchestrator — not inside the MCP servers.
-For every turn the orchestrator either:
-  - (actor mode) calls get_actor_action (Q-table, no LLM), then generates the NL message
-    here via Gatekeeper, then calls take_action with the message; or
-  - (llm mode) uses ToolCaller to let the LLM call get_state then take_action directly.
+For actor mode: get_actor_action (Q-table) → LLM message here → take_action.
+For llm mode: ToolCaller lets the LLM call get_state then take_action.
 
 Usage:
     python scripts/run_match.py [--seed SEED] [--max-rounds 30] [--mode actor|llm]
+                                [--game-type internal|bonus]
 """
 
 from __future__ import annotations
@@ -43,12 +42,13 @@ _SYSTEM_THIEF = (
     "You may move N NE E SE S SW W NW. No barriers. "
     "Call get_state to observe the board, then take_action with your move and a brief message."
 )
-
 _DIRS: dict[str, str] = {
     "N": "north", "NE": "northeast", "E": "east", "SE": "southeast",
     "S": "south", "SW": "southwest", "W": "west", "NW": "northwest",
     "BARRIER": "barrier on current cell",
 }
+_MAX_FORFEIT_STREAK = 3   # consecutive actor errors before technical loss
+_MAX_SG_RETRIES = 3       # max re-runs per sub-game on technical loss
 
 
 def _wait_for_server(url: str, timeout: float = 20.0) -> None:
@@ -99,6 +99,28 @@ def _start_servers(env_a: dict, env_b: dict, python: str) -> tuple:
     return proc_a, proc_b
 
 
+def _load_config() -> dict:
+    """Load game configuration from config/config.json (empty dict if missing)."""
+    cfg_path = _REPO_ROOT / "config" / "config.json"
+    if cfg_path.exists():
+        with cfg_path.open() as fh:
+            return json.load(fh)
+    return {}
+
+
+def _read_terminal(sg_id: str) -> dict:
+    """Read the terminal log entry for sg_id from server_a or server_b game log."""
+    for server in ("server_a", "server_b"):
+        log_path = _REPO_ROOT / "games" / server / sg_id / "game.log"
+        if log_path.exists():
+            for raw in reversed(log_path.read_text().splitlines()):
+                if raw.strip():
+                    entry = json.loads(raw)
+                    if entry.get("type") == "terminal":
+                        return entry
+    return {}
+
+
 async def _agent_turn(
     caller: object, client: Client, game_id: str, actor: str, system: str,
 ) -> dict:
@@ -132,32 +154,78 @@ async def _agent_turn(
         "First call get_state to see the board, then call take_action with your move."
     )
     await caller.call_with_tools(
-        [{"role": "user", "content": prompt}],
-        GAME_TOOLS,
-        executor,
-        system=system,
+        [{"role": "user", "content": prompt}], GAME_TOOLS, executor, system=system,
     )
     return last_result
 
 
-async def _actor_game_loop(
-    url_a: str, url_b: str, game_id: str, max_rounds: int,
-) -> dict:
-    """Drive turns: orchestrator calls get_actor_action then generates NL message.
+def _tech_loss(reason: str) -> dict:
+    """Return a technical-loss sentinel dict."""
+    return {"technical_loss": True, "reason": reason}
 
-    Per PRD §6: LLM lives here in the orchestrator, not inside the MCP servers.
-    Flow each turn: get_actor_action (Q-table, no LLM) → LLM generates message
-    here → take_action (applies action, forwards to opponent).
+
+async def _actor_turn(
+    client: object, actor: str, game_id: str,
+    gk: object, system: str, timeout: float,
+) -> dict:
+    """Execute one actor turn with timeout: get_actor_action → NL message → take_action.
+
+    Args:
+        client: FastMCP Client connected to the actor's server.
+        actor: "cop" or "thief".
+        game_id: Active game identifier.
+        gk: Gatekeeper instance for LLM calls.
+        system: System prompt for NL message generation.
+        timeout: Per-tool-call timeout in seconds.
 
     Returns:
-        Final ActionResult dict (game_over, winner, win_reason).
+        ActionResult dict, or {"forfeit": True, "reason": ...} on timeout/error.
+    """
+    try:
+        ar = await asyncio.wait_for(
+            client.call_tool("get_actor_action", {"game_id": game_id, "actor": actor}),
+            timeout=timeout,
+        )
+        adata = json.loads(ar.content[0].text if ar.content else "{}")
+        if "error" in adata:
+            return {"forfeit": True, "reason": adata["error"]}
+        action = adata["action"]
+        direction = _DIRS.get(action, action.lower())
+        prompt = (
+            f"Complete: 'Moving {direction}___.' with 1-3 words. "
+            f"Reply must start with 'Moving {direction}'."
+        )
+        msg = await asyncio.to_thread(gk.call, [{"role": "user", "content": prompt}], system)
+        tr = await asyncio.wait_for(
+            client.call_tool(
+                "take_action",
+                {"game_id": game_id, "actor": actor, "action": action, "message": msg.strip()},
+            ),
+            timeout=timeout,
+        )
+        result = json.loads(tr.content[0].text if tr.content else "{}")
+        if not result.get("success", True):
+            return {"forfeit": True, "reason": "illegal_action"}
+        return result
+    except TimeoutError:
+        return {"forfeit": True, "reason": "timeout"}
+
+
+async def _actor_game_loop(
+    url_a: str, url_b: str, game_id: str, max_rounds: int,
+    turn_timeout: float = 30.0, max_forfeits: int = 3,
+) -> dict:
+    """Drive turns via _actor_turn (Q-table → NL message → take_action) per PRD §6.
+
+    Returns:
+        Final ActionResult dict, or a technical-loss sentinel on engine divergence.
     """
     from game.shared.gatekeeper import Gatekeeper
 
-    model = os.environ.get("LLM_MODEL") or None
-    gk = Gatekeeper(model=model)
+    gk = Gatekeeper(model=os.environ.get("LLM_MODEL") or None)
     auth = BearerAuth(_API_KEY)
     last_result: dict = {}
+    consec_forfeits: dict[str, int] = {"thief": 0, "cop": 0}
 
     async with Client(url_a + "/mcp", auth=auth) as ca, \
                Client(url_b + "/mcp", auth=auth) as cb:
@@ -169,31 +237,19 @@ async def _actor_game_loop(
                 (ca, "thief", _SYSTEM_THIEF),
                 (cb, "cop", _SYSTEM_COP),
             ]:
-                # 1. Q-table action — server returns action, no LLM
-                ar = await client.call_tool(
-                    "get_actor_action", {"game_id": game_id, "actor": actor}
-                )
-                adata = json.loads(ar.content[0].text if ar.content else "{}")
-                if "error" in adata:
-                    print(f"  {actor}: actor error — {adata['error']}")
+                result = await _actor_turn(client, actor, game_id, gk, system, turn_timeout)
+                if result.get("forfeit"):
+                    consec_forfeits[actor] += 1
+                    if consec_forfeits[actor] >= max_forfeits:
+                        return _tech_loss(f"consecutive_forfeits:{actor}")
+                    streak = consec_forfeits[actor]
+                    print(f"  {actor}: forfeit ({result.get('reason')}) — streak {streak}")
                     continue
-                action = adata["action"]
-                # 2. LLM in orchestrator generates NL message
-                direction = _DIRS.get(action, action.lower())
-                prompt = (
-                    f"Complete: 'Moving {direction}___.' with 1-3 words. "
-                    f"Reply must start with 'Moving {direction}'."
-                )
-                msg = await asyncio.to_thread(
-                    gk.call, [{"role": "user", "content": prompt}], system,
-                )
-                # 3. Submit action + NL message
-                tr = await client.call_tool(
-                    "take_action",
-                    {"game_id": game_id, "actor": actor,
-                     "action": action, "message": msg.strip()},
-                )
-                result = json.loads(tr.content[0].text if tr.content else "{}")
+                consec_forfeits[actor] = 0
+                if result.get("hash_match") is False:
+                    return _tech_loss("hash_mismatch")
+                if "comm_error" in result:
+                    return _tech_loss(f"comm_error:{result['comm_error']}")
                 last_result = result
                 print(f"  {actor}: {result}")
                 if result.get("game_over"):
@@ -205,13 +261,16 @@ async def _actor_game_loop(
 async def _game_loop(
     url_a: str, url_b: str, game_id: str, max_rounds: int,
 ) -> dict:
-    """Drive alternating thief/cop turns until game_over or max_rounds (LLM mode)."""
+    """Drive alternating thief/cop turns until game_over or max_rounds (LLM mode).
+
+    Returns:
+        Final ActionResult dict, or a technical-loss sentinel on engine divergence.
+    """
     from game.shared.gatekeeper import Gatekeeper
     from game.shared.tool_caller import ToolCaller
 
     model = os.environ.get("LLM_MODEL") or None
     caller = ToolCaller(Gatekeeper(model=model))
-
     auth = BearerAuth(_API_KEY)
     last_result: dict = {}
     async with Client(url_a + "/mcp", auth=auth) as ca, \
@@ -221,10 +280,13 @@ async def _game_loop(
             round_num += 1
             print(f"\n[round {round_num}]")
             for client, actor, system in [
-                (ca, "thief", _SYSTEM_THIEF),
-                (cb, "cop", _SYSTEM_COP),
+                (ca, "thief", _SYSTEM_THIEF), (cb, "cop", _SYSTEM_COP),
             ]:
                 result = await _agent_turn(caller, client, game_id, actor, system)
+                if result.get("hash_match") is False:
+                    return _tech_loss("hash_mismatch")
+                if "comm_error" in result:
+                    return _tech_loss(f"comm_error:{result['comm_error']}")
                 last_result = result
                 print(f"  {actor}: {result}")
                 if result.get("game_over"):
@@ -233,7 +295,103 @@ async def _game_loop(
     return last_result
 
 
-def _maybe_send_report(sub_games: list[dict], series_id: str) -> None:
+def _sg_role(sg_n: int, game_type: str) -> str:
+    """Return server_a's role for sub-game sg_n.
+
+    Internal game: alternates thief/cop each sub-game (PRD §4).
+    Bonus game: server_a=cop for sub-games 1-3, thief for 4-6 (PRD §12).
+    """
+    if game_type == "bonus":
+        return "cop" if sg_n <= 3 else "thief"
+    return "thief" if sg_n % 2 == 1 else "cop"
+
+
+async def _run_series(
+    url_a: str, url_b: str, mode: str, seed: int,
+    max_rounds: int, game_type: str, grid: tuple[int, int],
+    turn_timeout: float = 30.0, max_forfeits: int = 3,
+    num_games: int = 6,
+) -> list[dict]:
+    """Run num_games valid sub-games, re-running on technical loss.
+
+    Args:
+        url_a: URL for server A.
+        url_b: URL for server B.
+        mode: "actor" or "llm".
+        seed: Base seed; sub-game n uses seed + n - 1.
+        max_rounds: Per-sub-game round cap.
+        game_type: "internal" (alternating) or "bonus" (3+3 split, PRD §12).
+        grid: Grid dimensions.
+        turn_timeout: Seconds allowed per tool call (actor mode, §3.1).
+        max_forfeits: Consecutive forfeit limit before technical loss.
+        num_games: Number of valid sub-games to play (default 6).
+
+    Returns:
+        List of sub-game result dicts for the report.
+    """
+    sub_games: list[dict] = []
+    sg_n = 1
+    while sg_n <= num_games:
+        valid = False
+        for attempt in range(1, _MAX_SG_RETRIES + 1):
+            sg_seed = seed + sg_n - 1
+            sg_id = f"match{seed:04d}_sg{sg_n:02d}" + (f"_r{attempt}" if attempt > 1 else "")
+            cop_pos, thief_pos = _derive_positions(sg_seed, grid)
+
+            a_role = _sg_role(sg_n, game_type)
+            b_role = "cop" if a_role == "thief" else "thief"
+            base_prop = {"game_id": sg_id, "seed": sg_seed,
+                         "cop_pos": cop_pos, "thief_pos": thief_pos,
+                         "grid_size": list(grid)}
+            _post(url_b, "/game/propose_match", {**base_prop, "my_role": b_role})
+            _post(url_a, "/game/propose_match", {**base_prop, "my_role": a_role})
+
+            thief_url = url_a if a_role == "thief" else url_b
+            cop_url = url_b if a_role == "thief" else url_a
+            print(f"\n[sub-game {sg_n}/6  attempt {attempt}]  a={a_role} b={b_role}")
+
+            result = (
+                await _actor_game_loop(thief_url, cop_url, sg_id, max_rounds,
+                                       turn_timeout, max_forfeits)
+                if mode == "actor"
+                else await _game_loop(thief_url, cop_url, sg_id, max_rounds)
+            )
+
+            if result.get("technical_loss"):
+                reason = result.get("reason", "unknown")
+                print(f"  TECHNICAL LOSS ({reason}) — {_MAX_SG_RETRIES - attempt} retries left")
+                continue  # retry same sub-game number
+
+            winner = result.get("winner")
+            win_reason = result.get("win_reason") or "thief_survived"
+            cop_pts, thief_pts = (20, 5) if winner == "cop" else (5, 10)
+            terminal = _read_terminal(sg_id)
+            sub_games.append({
+                "sub_game": sg_n, "initiator_role": a_role,
+                "cop": "server_b" if a_role == "thief" else "server_a",
+                "thief": "server_a" if a_role == "thief" else "server_b",
+                "winner": winner, "win_reason": win_reason,
+                "rounds": terminal.get("rounds"),
+                "barriers_used": terminal.get("barriers_used"),
+                "scores": {"cop": cop_pts, "thief": thief_pts},
+            })
+            print(f"  winner={winner} ({win_reason})")
+            valid = True
+            break
+
+        if not valid:
+            print(f"  Sub-game {sg_n} exhausted {_MAX_SG_RETRIES} retries — recording void.")
+            sub_games.append({
+                "sub_game": sg_n, "initiator_role": _sg_role(sg_n, game_type),
+                "winner": None, "win_reason": "technical_loss",
+                "scores": {"cop": 0, "thief": 0},
+            })
+        sg_n += 1
+    return sub_games
+
+
+def _maybe_send_report(sub_games: list[dict], series_id: str,
+                       game_type: str = "internal") -> None:
     """Send the match report via Gmail if GMAIL_ENABLED=true and GMAIL_RECIPIENT is set."""
     from game.gmail.gmail_plugin import is_enabled
     if not is_enabled():
@@ -241,17 +399,22 @@ def _maybe_send_report(sub_games: list[dict], series_id: str) -> None:
         return
     from game.gmail.reporter import build_report
     from game.gmail.sender import send_report
-    report = build_report(sub_games, report_type="internal")
+    report = build_report(sub_games, report_type=game_type)
     send_report(report)
     print(f"[report] Sent to {os.environ.get('GMAIL_RECIPIENT')}")
 
 
 async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
-                      models_dir: str) -> None:
-    """Start servers, run 6 sub-games with role alternation, send report, stop servers."""
-    grid = (5, 5)
+                      models_dir: str, game_type: str, num_games: int = 6) -> None:
+    """Start servers, run the sub-game series, print totals, send report."""
+    cfg = _load_config()
+    grid_cfg = cfg.get("grid_size", [5, 5])
+    grid = (grid_cfg[0], grid_cfg[1])
+    turn_timeout = float(cfg.get("turn_timeout_seconds", 30))
+    max_forfeits = int(cfg.get("max_consecutive_forfeits", _MAX_FORFEIT_STREAK))
+    num_games = num_games or int(cfg.get("num_games", 6))
     series_id = f"series{seed:04d}"
-    print(f"[match] seed={seed} series_id={series_id} mode={mode}")
+    print(f"[match] seed={seed} series_id={series_id} mode={mode} game_type={game_type}")
 
     env_a = {**os.environ, "OPPONENT_MCP_URL": "http://localhost:8002",
              "MCP_API_KEY": _API_KEY, "MCP_ALLOWED_API_KEYS": _API_KEY}
@@ -264,11 +427,9 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
         existing_pypath = os.environ.get("PYTHONPATH", "")
         extra_pypath = parent_src + (os.pathsep + existing_pypath if existing_pypath else "")
         env_a = {**env_a, "ACTOR_CLASS": actor_class,
-                 "ACTOR_TABLE": str(mdir / "thief_qtable.npy"),
-                 "PYTHONPATH": extra_pypath}
+                 "ACTOR_TABLE": str(mdir / "thief_qtable.npy"), "PYTHONPATH": extra_pypath}
         env_b = {**env_b, "ACTOR_CLASS": actor_class,
-                 "ACTOR_TABLE": str(mdir / "cop_qtable.npy"),
-                 "PYTHONPATH": extra_pypath}
+                 "ACTOR_TABLE": str(mdir / "cop_qtable.npy"), "PYTHONPATH": extra_pypath}
 
     proc_a, proc_b = _start_servers(env_a, env_b, sys.executable)
     url_a, url_b = "http://localhost:8001", "http://localhost:8002"
@@ -278,51 +439,13 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
         _wait_for_server(url_b)
         print("[match] both servers up")
 
-        sub_games: list[dict] = []
-        for sg_n in range(1, 7):
-            sg_seed = seed + sg_n - 1
-            sg_id = f"match{seed:04d}_sg{sg_n:02d}"
-            cop_pos, thief_pos = _derive_positions(sg_seed, grid)
-            # Odd sub-games: server_a=thief; even: server_a=cop (PRD §4 role alternation)
-            a_role = "thief" if sg_n % 2 == 1 else "cop"
-            b_role = "cop" if a_role == "thief" else "thief"
-
-            base_prop = {"game_id": sg_id, "seed": sg_seed,
-                         "cop_pos": cop_pos, "thief_pos": thief_pos,
-                         "grid_size": list(grid)}
-            _post(url_b, "/game/propose_match", {**base_prop, "my_role": b_role})
-            _post(url_a, "/game/propose_match", {**base_prop, "my_role": a_role})
-
-            thief_url = url_a if a_role == "thief" else url_b
-            cop_url = url_b if a_role == "thief" else url_a
-            print(f"\n[sub-game {sg_n}/6]  a={a_role} b={b_role}  seed={sg_seed}")
-
-            result = (
-                await _actor_game_loop(thief_url, cop_url, sg_id, max_rounds)
-                if mode == "actor"
-                else await _game_loop(thief_url, cop_url, sg_id, max_rounds)
-            )
-
-            winner = result.get("winner")
-            win_reason = result.get("win_reason") or "thief_survived"
-            cop_pts = 20 if winner == "cop" else 5
-            thief_pts = 10 if winner == "thief" else 5
-            sub_games.append({
-                "sub_game": sg_n, "initiator_role": a_role,
-                "cop": "server_b" if a_role == "thief" else "server_a",
-                "thief": "server_a" if a_role == "thief" else "server_b",
-                "winner": winner, "win_reason": win_reason,
-                "scores": {"cop": cop_pts, "thief": thief_pts},
-            })
-            print(f"  winner={winner} ({win_reason})")
-            log_a = Path("games/server_a") / sg_id / "game.log"
-            log_b = Path("games/server_b") / sg_id / "game.log"
-            print(f"  Logs: {log_a}  |  {log_b}")
+        sub_games = await _run_series(url_a, url_b, mode, seed, max_rounds, game_type, grid,
+                                       turn_timeout, max_forfeits, num_games)
 
         cop_total = sum(sg["scores"]["cop"] for sg in sub_games)
         thief_total = sum(sg["scores"]["thief"] for sg in sub_games)
         print(f"\n[series] totals: cop={cop_total}  thief={thief_total}")
-        _maybe_send_report(sub_games, series_id)
+        _maybe_send_report(sub_games, series_id, game_type)
 
     finally:
         proc_a.terminate()
@@ -338,14 +461,19 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=random.randint(0, 9999))
     parser.add_argument("--max-rounds", type=int, default=30)
     parser.add_argument("--mode", choices=["llm", "actor"], default="llm",
-                        help="llm: LLM tool-use loop; actor: Q-table actor via get_actor_action")
+                        help="llm: LLM tool-use loop; actor: Q-table actor")
     parser.add_argument("--actor-class", default="actor_t6.qtable_actor.QTableActor",
                         help="Dotted class path for ACTOR_CLASS (actor mode only)")
     parser.add_argument("--models-dir", default="models",
                         help="Directory containing cop_qtable.npy / thief_qtable.npy")
+    parser.add_argument("--game-type", choices=["internal", "bonus"], default="internal",
+                        help="internal: alternating roles; bonus: 3+3 split (PRD §12)")
+    parser.add_argument("--num-games", type=int, default=0,
+                        help="Sub-games to play (0 = use config.json value, default 6)")
     args = parser.parse_args()
     asyncio.run(_async_main(args.seed, args.max_rounds, args.mode,
-                            args.actor_class, args.models_dir))
+                            args.actor_class, args.models_dir, args.game_type,
+                            args.num_games))
 
 
 if __name__ == "__main__":
