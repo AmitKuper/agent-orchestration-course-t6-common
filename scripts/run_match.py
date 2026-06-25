@@ -76,14 +76,26 @@ def _derive_positions(seed: int, grid: tuple[int, int]) -> tuple[list[int], list
     return cop, thief
 
 
-def _start_servers(env_a: dict, env_b: dict, python: str) -> tuple:
-    """Launch server A (port 8001) and server B (port 8002) as subprocesses."""
+def _start_servers(env_a: dict, env_b: dict, python: str, single: bool = False) -> tuple:
+    """Launch server A (port 8001) and optionally server B (port 8002).
+
+    Args:
+        env_a: Environment for server A.
+        env_b: Environment for server B (ignored when single=True).
+        python: Python executable path.
+        single: If True, only start server A (opponent is external).
+
+    Returns:
+        (proc_a, proc_b) — proc_b is None when single=True.
+    """
     mod = "game.wrappers.mcp_server"
     cwd = str(_REPO_ROOT)
     proc_a = subprocess.Popen(
         [python, "-m", mod, "--port", "8001", "--games-dir", "games/server_a"],
         env=env_a, cwd=cwd,
     )
+    if single:
+        return proc_a, None
     proc_b = subprocess.Popen(
         [python, "-m", mod, "--port", "8002", "--games-dir", "games/server_b"],
         env=env_b, cwd=cwd,
@@ -154,6 +166,22 @@ async def _agent_turn(
 def _tech_loss(reason: str) -> dict:
     """Return a technical-loss sentinel dict."""
     return {"technical_loss": True, "reason": reason}
+
+
+async def _propose_match(client: object, args: dict) -> None:
+    """Call propose_match_tool, stripping view_radius if the remote rejects it.
+
+    Older server versions don't accept view_radius; this falls back gracefully.
+    """
+    from fastmcp.exceptions import ToolError
+    try:
+        await client.call_tool("propose_match_tool", args)
+    except ToolError as exc:
+        if "view_radius" in str(exc) and "unexpected" in str(exc).lower():
+            stripped = {k: v for k, v in args.items() if k != "view_radius"}
+            await client.call_tool("propose_match_tool", stripped)
+        else:
+            raise
 
 
 def _board_str(sg_id: str) -> str:
@@ -399,9 +427,9 @@ async def _run_series(
                           "grid_size": list(grid), "view_radius": view_radius}
             auth = BearerAuth(_API_KEY)
             async with Client(url_b + "/mcp", auth=auth) as _cb:
-                await _cb.call_tool("propose_match_tool", {**match_args, "my_role": b_role})
+                await _propose_match(_cb, {**match_args, "my_role": b_role})
             async with Client(url_a + "/mcp", auth=auth) as _ca:
-                await _ca.call_tool("propose_match_tool", {**match_args, "my_role": a_role})
+                await _propose_match(_ca, {**match_args, "my_role": a_role})
 
             thief_url = url_a if a_role == "thief" else url_b
             cop_url = url_b if a_role == "thief" else url_a
@@ -520,7 +548,8 @@ def _maybe_send_report(sub_games: list[dict], series_id: str,
 
 
 async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
-                      models_dir: str, game_type: str, num_games: int = 6) -> None:
+                      models_dir: str, game_type: str, num_games: int = 6,
+                      opponent_url: str = "") -> None:
     """Start servers, run the sub-game series, print totals, send report."""
     cfg = _load_config()
     grid_cfg = cfg.get("grid_size", [5, 5])
@@ -542,7 +571,12 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
     player_a = os.environ.get("PLAYER_NAME", "Player A")
     player_b = os.environ.get("OPPONENT_PLAYER_NAME", "Player B")
 
-    env_a = {**os.environ, "OPPONENT_MCP_URL": "http://localhost:8002",
+    # Normalise opponent URL: add http:// scheme if missing.
+    if opponent_url and not opponent_url.startswith("http"):
+        opponent_url = "http://" + opponent_url
+    url_b = opponent_url or "http://localhost:8002"
+
+    env_a = {**os.environ, "OPPONENT_MCP_URL": url_b,
              "MCP_API_KEY": _API_KEY, "MCP_ALLOWED_API_KEYS": _API_KEY,
              "PLAYER_NAME": player_a}
     env_b = {**os.environ, "OPPONENT_MCP_URL": "http://localhost:8001",
@@ -560,13 +594,15 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
         env_b = {**env_b, "ACTOR_CLASS": actor_class,
                  "ACTOR_TABLE": str(mdir / "cop_qtable.npy"), "PYTHONPATH": extra_pypath}
 
-    proc_a, proc_b = _start_servers(env_a, env_b, sys.executable)
-    url_a, url_b = "http://localhost:8001", "http://localhost:8002"
+    single = bool(opponent_url)
+    proc_a, proc_b = _start_servers(env_a, env_b, sys.executable, single=single)
+    url_a = "http://localhost:8001"
     try:
         print("[match] waiting for servers...")
         _wait_for_server(url_a)
-        _wait_for_server(url_b)
-        print("[match] both servers up")
+        if not single:
+            _wait_for_server(url_b)
+        print(f"[match] server(s) up — opponent: {url_b}")
 
         sub_games = await _run_series(url_a, url_b, mode, seed, max_rounds, game_type, grid,
                                        turn_timeout, max_forfeits, num_games, view_radius)
@@ -593,9 +629,10 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
 
     finally:
         proc_a.terminate()
-        proc_b.terminate()
         proc_a.wait()
-        proc_b.wait()
+        if proc_b:
+            proc_b.terminate()
+            proc_b.wait()
         print("[match] servers stopped")
 
 
@@ -614,10 +651,12 @@ def main() -> None:
                         help="internal: alternating roles; bonus: 3+3 split (PRD §12)")
     parser.add_argument("--num-games", type=int, default=0,
                         help="Sub-games to play (0 = use config.json value, default 6)")
+    parser.add_argument("--opponent-url", default="",
+                        help="External opponent MCP URL — skips starting server B locally")
     args = parser.parse_args()
     asyncio.run(_async_main(args.seed, args.max_rounds, args.mode,
                             args.actor_class, args.models_dir, args.game_type,
-                            args.num_games))
+                            args.num_games, args.opponent_url))
 
 
 if __name__ == "__main__":
