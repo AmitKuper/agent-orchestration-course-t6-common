@@ -232,11 +232,22 @@
   - [x] Seed increments per sub-game (sg_seed = seed + sg_n - 1)
   - [x] Scores accumulated; totals printed after series
 - [x] Gmail reporting wired in `run_match.py` — `_maybe_send_report` called after 6 sub-games
+- [x] **Technical loss detection → void sub-game, re-run (§3.1):**
+  - [x] `_actor_turn()` helper with `asyncio.wait_for(turn_timeout)` per tool call
+  - [x] Forfeit on timeout, actor error, or `success=False`
+  - [x] `max_consecutive_forfeits` → technical loss; sub-game re-runs up to `_MAX_SG_RETRIES`
+- [x] **§4.1/§10 Terminal log data in reports:**
+  - [x] `_read_terminal(sg_id)` reads `game.log` for `rounds` + `barriers_used`
+  - [x] Both fields added to sub-game result dict
+- [x] **§5 Config reading from file:**
+  - [x] `config/config.json` created with all game parameters
+  - [x] `mcp_resources.py` loads `_GAME_CONFIG` from file (fallback to defaults)
+  - [x] `run_match.py` reads `grid_size`, `turn_timeout_seconds`, `max_consecutive_forfeits` from config
+  - [x] `setup.json` updated to reference `config/config.json`
+- [x] **Bonus 3+3 role split (PRD §12):** `_sg_role()` returns cop/cop/cop/thief/thief/thief for bonus mode
 - [ ] Partial observation — `view_radius` (Chebyshev) filtering in `get_state`
   - [ ] Opponent position hidden when outside `view_radius`
   - [ ] Barriers outside radius hidden
   - [ ] Hidden state must never leak into Actor
-- [ ] Technical loss detection → void sub-game, re-run
-- [ ] `max_consecutive_forfeits` → technical loss
 - [ ] Deploy both MCP servers to cloud (e.g. Prefect) with public URLs
-- [ ] Bonus inter-group game support (3+3 role split, PRD §12)
+- [ ] Bonus inter-group game (requires cloud deployment)

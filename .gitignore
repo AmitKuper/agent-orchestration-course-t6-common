@@ -29,6 +29,10 @@ games/
 .env.*
 !.env.example
 
+# Gmail OAuth tokens (contain refresh tokens — never commit)
+config/gmail_token.json
+config/gmail_credentials.json
+
 # IDE
 .idea/
 .vscode/
