@@ -16,21 +16,25 @@ _RULES_COMMON = (
     "Each round: thief moves first, then cop.\n"
     "Moves: N NE E SE S SW W NW (one step each direction).\n"
     "Barrier: cop only, max 5 per game, placed on current cell (BARRIER action).\n"
+    "Stay: thief only, pass the turn without moving (STAY action).\n"
     "Win conditions:\n"
-    "  Cop wins — lands on thief (capture) or thief has no legal moves (trapped).\n"
+    "  Cop wins — lands on thief cell (capture).\n"
     "  Thief wins — survives 25 rounds or cop has no moves and no barriers left.\n"
     "Always reply with one intent sentence, then on a new line: Action: <MOVE>\n"
 )
 
 _COP_ROLE = (
     "You are the COP. Your goal is to capture the thief by sharing its cell.\n"
-    "You may also play BARRIER on your current cell to restrict thief movement "
-    "(max 5 barriers per game).\n"
+    "You may play BARRIER on your current cell to slow the thief (max 5 per game).\n"
+    "Partial observation: you can only see the thief when it is within 1 cell "
+    "(Chebyshev distance). When the thief is out of range, opponent_pos is null — "
+    "reason from the last known position and barriers.\n"
 )
 
 _THIEF_ROLE = (
     "You are the THIEF. Your goal is to survive 25 rounds without being captured.\n"
-    "You cannot place barriers — focus on evasion and preserving open-space options.\n"
+    "You cannot place barriers. You always see the cop's exact position.\n"
+    "Use STAY to pass a turn and bait the cop into committing to a direction.\n"
 )
 
 

@@ -33,8 +33,9 @@ GAME_TOOLS: list[dict] = [
         "name": "take_action",
         "description": (
             "Submit your chosen action for this turn. "
-            "Valid actions: N NE E SE S SW W NW (movement) or BARRIER "
-            "(cop only, places barrier on current cell). "
+            "Valid actions: N NE E SE S SW W NW (movement), "
+            "BARRIER (cop only, places barrier on current cell), "
+            "or STAY (thief only, remain on current cell for one turn). "
             "Include a short natural-language message describing your intent."
         ),
         "input_schema": {
@@ -42,7 +43,7 @@ GAME_TOOLS: list[dict] = [
             "properties": {
                 "game_id": {"type": "string", "description": "The game identifier."},
                 "actor": {"type": "string", "description": "'cop' or 'thief'."},
-                "action": {"type": "string", "description": "Move direction or BARRIER."},
+                "action": {"type": "string", "description": "Move direction, BARRIER, or STAY."},
                 "message": {"type": "string", "description": "Brief intent message."},
             },
             "required": ["game_id", "actor", "action"],
