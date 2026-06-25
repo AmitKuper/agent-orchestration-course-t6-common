@@ -534,6 +534,13 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
     series_id = f"series{seed:04d}"
     print(f"[match] seed={seed} series_id={series_id} mode={mode} game_type={game_type}")
 
+    # Resolve token/credentials paths relative to _REPO_ROOT so they work
+    # regardless of the working directory the orchestrator is invoked from.
+    for _env_key in ("GMAIL_TOKEN_PATH", "GMAIL_CREDENTIALS_PATH"):
+        _val = os.environ.get(_env_key, "")
+        if _val and not Path(_val).is_absolute():
+            os.environ[_env_key] = str((_REPO_ROOT / _val).resolve())
+
     player_a = os.environ.get("PLAYER_NAME", "Player A")
     player_b = os.environ.get("OPPONENT_PLAYER_NAME", "Player B")
 
@@ -545,7 +552,8 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
              "PLAYER_NAME": player_b}
 
     if mode == "actor":
-        mdir = Path(models_dir)
+        # Resolve models_dir to absolute so subprocess cwd doesn't matter.
+        mdir = Path(models_dir) if Path(models_dir).is_absolute() else Path.cwd() / models_dir
         parent_src = str(_REPO_ROOT.parent / "src")
         existing_pypath = os.environ.get("PYTHONPATH", "")
         extra_pypath = parent_src + (os.pathsep + existing_pypath if existing_pypath else "")
