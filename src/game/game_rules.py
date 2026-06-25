@@ -11,6 +11,7 @@ from game.constants import (
     BARRIER_ACTION,
     COP,
     DIRECTIONS,
+    STAY_ACTION,
     THIEF,
     WIN_CAPTURE,
     WIN_COP_TRAPPED,
@@ -53,6 +54,11 @@ class GameRules:
             s.round += 1
 
         return self._finalize_turn(actor)
+
+    def _apply_stay(self) -> ActionResult:
+        """Thief stays in place for one turn without changing position."""
+        self._state.round += 1
+        return self._finalize_turn(THIEF)
 
     def _apply_barrier(self, actor: str) -> ActionResult:
         """Place a barrier on cop's current cell (cop only)."""
@@ -97,12 +103,7 @@ class GameRules:
                 winner=THIEF, win_reason=WIN_THIEF_SURVIVED,
             )
 
-        if not self._compute_legal_moves(THIEF):
-            s.game_over, s.winner, s.win_reason = True, COP, WIN_THIEF_TRAPPED
-            return ActionResult(
-                success=True, error=None, game_over=True,
-                winner=COP, win_reason=WIN_THIEF_TRAPPED,
-            )
+        # Thief can always STAY, so WIN_THIEF_TRAPPED is not reachable.
 
         cop_moves = self._compute_legal_moves(COP)
         can_barrier = s.barriers_placed < s.max_barriers and s.cop_pos not in s.barriers
@@ -129,6 +130,8 @@ class GameRules:
         moves.sort()
         if actor == COP and s.barriers_placed < s.max_barriers and pos not in s.barriers:
             moves.append(BARRIER_ACTION)
+        if actor == THIEF:
+            moves.append(STAY_ACTION)
         return moves
 
     def _in_bounds(self, pos: tuple[int, int]) -> bool:

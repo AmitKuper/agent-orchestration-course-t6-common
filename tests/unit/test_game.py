@@ -159,23 +159,16 @@ def test_thief_survived_win() -> None:
     assert result.win_reason == "thief_survived"
 
 
-def test_thief_trapped_win() -> None:
-    """Thief with no legal moves → cop wins by thief_trapped."""
-    # 3x3 grid; surround thief at (2,2) with barriers on all 8 neighbours
+def test_thief_surrounded_can_stay() -> None:
+    """Thief with all neighbours barriered still has STAY as a legal move."""
     g = Game.new("t", (3, 3), (0, 0), (2, 2))
-    # Manually place barriers on all 8 cells around (2,2) that are in-grid
     for pos in [(1, 1), (2, 1), (1, 2)]:
         g._state.barriers.append(pos)
-    # Now (2,2) has only neighbours (1,1),(2,1),(1,2) — all barriered — plus off-grid
-    # Check no legal moves
     obs = g.get_state(THIEF)
-    assert obs.legal_moves == []
-    # Submit any cop action to trigger win check
-    g._state.cop_pos = (0, 1)
-    result = g.submit_action(COP, "N")
-    assert result.game_over
-    assert result.winner == COP
-    assert result.win_reason == "thief_trapped"
+    assert obs.legal_moves == ["STAY"]
+    result = g.submit_action(THIEF, "STAY")
+    assert result.success
+    assert not result.game_over
 
 
 def test_game_over_rejects_further_actions() -> None:

@@ -15,9 +15,10 @@ DIRECTIONS: dict[str, tuple[int, int]] = {
 }
 
 BARRIER_ACTION = "BARRIER"
+STAY_ACTION = "STAY"
 
 ALL_MOVE_ACTIONS: frozenset[str] = frozenset(DIRECTIONS.keys())
-ALL_ACTIONS: frozenset[str] = ALL_MOVE_ACTIONS | {BARRIER_ACTION}
+ALL_ACTIONS: frozenset[str] = ALL_MOVE_ACTIONS | {BARRIER_ACTION, STAY_ACTION}
 
 # Actor names
 COP = "cop"

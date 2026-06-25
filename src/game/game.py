@@ -10,7 +10,7 @@ import hashlib
 import json
 from typing import Any
 
-from game.actions import BarrierAction, parse_action
+from game.actions import BarrierAction, StayAction, parse_action
 from game.constants import ACTORS, COP
 from game.game_rules import GameRules
 from game.game_state import GameState
@@ -93,6 +93,8 @@ class Game(GameRules):
             )
         if isinstance(parsed, BarrierAction):
             return self._apply_barrier(actor)
+        if isinstance(parsed, StayAction):
+            return self._apply_stay()
         return self._apply_move(actor, parsed)
 
     def get_state(self, actor: str) -> ObservationState:

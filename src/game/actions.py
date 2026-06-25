@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from game.constants import ALL_ACTIONS, BARRIER_ACTION, DIRECTIONS
+from game.constants import ALL_ACTIONS, BARRIER_ACTION, DIRECTIONS, STAY_ACTION
 
 
 @dataclass(frozen=True)
@@ -31,14 +31,21 @@ class BarrierAction:
     pass
 
 
-def parse_action(raw: str) -> MoveAction | BarrierAction:
+@dataclass(frozen=True)
+class StayAction:
+    """Thief stays in place for one turn (no position change)."""
+
+    pass
+
+
+def parse_action(raw: str) -> MoveAction | BarrierAction | StayAction:
     """Parse a raw action string into a typed action object.
 
     Args:
-        raw: Action string, e.g. "N", "NE", "BARRIER".
+        raw: Action string, e.g. "N", "NE", "BARRIER", "STAY".
 
     Returns:
-        MoveAction or BarrierAction instance.
+        MoveAction, BarrierAction, or StayAction instance.
 
     Raises:
         ValueError: If the action string is not recognized.
@@ -48,4 +55,6 @@ def parse_action(raw: str) -> MoveAction | BarrierAction:
         raise ValueError(f"Unknown action: {raw!r}. Valid actions: {sorted(ALL_ACTIONS)}")
     if action == BARRIER_ACTION:
         return BarrierAction()
+    if action == STAY_ACTION:
+        return StayAction()
     return MoveAction(direction=action)
