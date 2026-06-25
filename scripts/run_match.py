@@ -18,6 +18,13 @@ import os
 import random
 import subprocess
 import sys
+
+# Force UTF-8 output so emoji/non-ASCII in opponent messages don't crash on
+# Windows consoles that default to cp1252.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 import time
 from pathlib import Path
 
