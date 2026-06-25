@@ -156,11 +156,49 @@ def _tech_loss(reason: str) -> dict:
     return {"technical_loss": True, "reason": reason}
 
 
+def _board_str(sg_id: str) -> str:
+    """Return a compact ASCII board string from the latest game log entry."""
+    for server in ("server_a", "server_b"):
+        log_path = _REPO_ROOT / "games" / server / sg_id / "game.log"
+        if not log_path.exists():
+            continue
+        for raw in reversed(log_path.read_text(encoding="utf-8").splitlines()):
+            if not raw.strip():
+                continue
+            e = json.loads(raw)
+            if e.get("type") != "turn" or "state_after" not in e:
+                continue
+            sa = e["state_after"]
+            cols, rows = 5, 5
+            barriers = {tuple(b) for b in sa.get("barriers", [])}
+            cop = tuple(sa["cop"])
+            thief = tuple(sa["thief"])
+            lines = ["  " + " ".join(str(c) for c in range(cols))]
+            for r in range(rows):
+                row = [str(r)]
+                for c in range(cols):
+                    cell = (c, r)
+                    if cell == cop and cell == thief:
+                        row.append("X")
+                    elif cell == cop:
+                        row.append("C")
+                    elif cell == thief:
+                        row.append("T")
+                    elif cell in barriers:
+                        row.append("#")
+                    else:
+                        row.append(".")
+                lines.append(" ".join(row))
+            return "\n".join(lines)
+    return ""
+
+
 async def _actor_turn(
     client: object, actor: str, game_id: str,
     gk: object, system: str, timeout: float,
+    opponent_msg: str = "",
 ) -> dict:
-    """Execute one actor turn with timeout: get_actor_action → NL message → take_action.
+    """Execute one actor turn: get_actor_action → contextual NL message → take_action.
 
     Args:
         client: FastMCP Client connected to the actor's server.
@@ -169,9 +207,11 @@ async def _actor_turn(
         gk: Gatekeeper instance for LLM calls.
         system: System prompt for NL message generation.
         timeout: Per-tool-call timeout in seconds.
+        opponent_msg: The opponent's last NL message, for contextual response.
 
     Returns:
-        ActionResult dict, or {"forfeit": True, "reason": ...} on timeout/error.
+        ActionResult dict with "_msg" key for the sent message,
+        or {"forfeit": True, "reason": ...} on timeout/error.
     """
     try:
         ar = await asyncio.wait_for(
@@ -183,10 +223,19 @@ async def _actor_turn(
             return {"forfeit": True, "reason": adata["error"]}
         action = adata["action"]
         direction = _DIRS.get(action, action.lower())
-        prompt = (
-            f"Complete: 'Moving {direction}___.' with 1-3 words. "
-            f"Reply must start with 'Moving {direction}'."
-        )
+        if opponent_msg:
+            prompt = (
+                f"You are the {actor.upper()} in a cop-thief pursuit game. "
+                f"Opponent's last message: '{opponent_msg}'. "
+                f"You chose to move {direction}. "
+                "In 1-2 sentences describe your move and what you infer about the opponent."
+            )
+        else:
+            prompt = (
+                f"You are the {actor.upper()} in a cop-thief pursuit game "
+                f"and you are moving {direction}. "
+                "In one sentence describe your intent."
+            )
         msg = await asyncio.to_thread(gk.call, [{"role": "user", "content": prompt}], system)
         tr = await asyncio.wait_for(
             client.call_tool(
@@ -198,6 +247,7 @@ async def _actor_turn(
         result = json.loads(tr.content[0].text if tr.content else "{}")
         if not result.get("success", True):
             return {"forfeit": True, "reason": "illegal_action"}
+        result["_msg"] = msg.strip()
         return result
     except TimeoutError:
         return {"forfeit": True, "reason": "timeout"}
@@ -218,6 +268,7 @@ async def _actor_game_loop(
     auth = BearerAuth(_API_KEY)
     last_result: dict = {}
     consec_forfeits: dict[str, int] = {"thief": 0, "cop": 0}
+    last_messages: dict[str, str] = {"thief": "", "cop": ""}
 
     async with Client(url_a + "/mcp", auth=auth) as ca, \
                Client(url_b + "/mcp", auth=auth) as cb:
@@ -229,7 +280,11 @@ async def _actor_game_loop(
                 (ca, "thief", _SYSTEM_THIEF),
                 (cb, "cop", _SYSTEM_COP),
             ]:
-                result = await _actor_turn(client, actor, game_id, gk, system, turn_timeout)
+                opponent = "cop" if actor == "thief" else "thief"
+                result = await _actor_turn(
+                    client, actor, game_id, gk, system, turn_timeout,
+                    opponent_msg=last_messages[opponent],
+                )
                 if result.get("forfeit"):
                     consec_forfeits[actor] += 1
                     if consec_forfeits[actor] >= max_forfeits:
@@ -238,15 +293,21 @@ async def _actor_game_loop(
                     print(f"  {actor}: forfeit ({result.get('reason')}) — streak {streak}")
                     continue
                 consec_forfeits[actor] = 0
+                sent_msg = result.pop("_msg", "")
+                if sent_msg:
+                    last_messages[actor] = sent_msg
+                    print(f"  {actor} says: \"{sent_msg}\"")
                 if result.get("hash_match") is False:
                     return _tech_loss("hash_mismatch")
                 if "comm_error" in result:
                     return _tech_loss(f"comm_error:{result['comm_error']}")
                 last_result = result
-                print(f"  {actor}: {result}")
                 if result.get("game_over"):
                     game_over = True
                     break
+            board = _board_str(game_id)
+            if board:
+                print(board)
     return last_result
 
 
@@ -362,7 +423,7 @@ async def _run_series(
             cop_pts, thief_pts = (20, 5) if winner == "cop" else (5, 10)
             terminal = _read_terminal(sg_id)
             sub_games.append({
-                "sub_game": sg_n, "initiator_role": a_role,
+                "sub_game": sg_n, "sg_id": sg_id, "initiator_role": a_role,
                 "cop": "server_b" if a_role == "thief" else "server_a",
                 "thief": "server_a" if a_role == "thief" else "server_b",
                 "winner": winner, "win_reason": win_reason,
@@ -385,9 +446,40 @@ async def _run_series(
     return sub_games
 
 
+def _read_game_log(sg_id: str) -> list[dict]:
+    """Read all turn entries from the first available game.log for sg_id."""
+    for server in ("server_a", "server_b"):
+        log_path = _REPO_ROOT / "games" / server / sg_id / "game.log"
+        if log_path.exists():
+            entries = []
+            for raw in log_path.read_text(encoding="utf-8").splitlines():
+                if raw.strip():
+                    e = json.loads(raw)
+                    if e.get("type") == "turn":
+                        entries.append(e)
+            return entries
+    return []
+
+
+def _build_conversation(sub_games: list[dict]) -> str:
+    """Build a readable per-turn conversation log from all sub-game game.log files."""
+    parts = []
+    for sg in sub_games:
+        sg_id = sg.get("sg_id", "")
+        a_role = sg["initiator_role"]
+        parts.append(f"\n--- Sub-game {sg['sub_game']} (A={a_role}) ---")
+        for e in _read_game_log(sg_id):
+            msg = e.get("message") or ""
+            parts.append(f"  R{e['turn']:2d} {e['actor']:5s}  {e['action']:7s}  {msg}")
+        winner = sg.get("winner") or "none"
+        parts.append(f"  => {winner} wins ({sg.get('win_reason', '')})")
+    return "\n".join(parts)
+
+
 async def _notify_both_servers(
     url_a: str, url_b: str, series_id: str,
-    winner_name: str, cop_total: int, thief_total: int, num_sg: int,
+    winner_name: str, cop_total: int, thief_total: int,
+    num_sg: int, conversation_log: str = "",
 ) -> None:
     """Call send_game_summary on both servers so each sends its own result email.
 
@@ -399,12 +491,13 @@ async def _notify_both_servers(
         cop_total: Total cop score.
         thief_total: Total thief score.
         num_sg: Number of valid sub-games played.
+        conversation_log: Per-turn conversation text to include in the email.
     """
     auth = BearerAuth(_API_KEY)
     payload = {
         "series_id": series_id, "winner_name": winner_name,
         "cop_total": cop_total, "thief_total": thief_total,
-        "num_sub_games": num_sg,
+        "num_sub_games": num_sg, "conversation_log": conversation_log,
     }
     for url in (url_a, url_b):
         async with Client(url + "/mcp", auth=auth) as c:
@@ -483,9 +576,11 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
             a_total += sg["scores"].get(a_role, 0)
             b_total += sg["scores"].get(b_role, 0)
         winner_name = player_a if a_total >= b_total else player_b
+        conversation = _build_conversation(sub_games)
         await _notify_both_servers(
             url_a, url_b, series_id, winner_name,
             cop_total, thief_total, len(sub_games),
+            conversation_log=conversation,
         )
 
     finally:

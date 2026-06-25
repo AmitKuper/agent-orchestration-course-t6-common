@@ -23,6 +23,7 @@ def register_report_tool(mcp: FastMCP) -> None:
         cop_total: int,
         thief_total: int,
         num_sub_games: int,
+        conversation_log: str = "",
     ) -> str:
         """Send a human-readable result email from this server's player perspective.
 
@@ -35,6 +36,7 @@ def register_report_tool(mcp: FastMCP) -> None:
             cop_total: Total cop score across all sub-games.
             thief_total: Total thief score across all sub-games.
             num_sub_games: Number of valid sub-games played.
+            conversation_log: Per-turn move/message log to append to the email.
 
         Returns:
             JSON {"sent": True, "from": name} on success, or {"error": ...}.
@@ -50,7 +52,7 @@ def register_report_tool(mcp: FastMCP) -> None:
             subject = f"Cop & Thief — {player_name} | Series {series_id}"
             body = _build_body(
                 player_name, series_id, winner_name,
-                cop_total, thief_total, num_sub_games,
+                cop_total, thief_total, num_sub_games, conversation_log,
             )
             send_email(recipient, subject, body)
             return json.dumps({"sent": True, "from": player_name, "to": recipient})
@@ -65,6 +67,7 @@ def _build_body(
     cop_total: int,
     thief_total: int,
     num_sub_games: int,
+    conversation_log: str = "",
 ) -> str:
     """Build the plain-text email body for a game result summary.
 
@@ -75,11 +78,12 @@ def _build_body(
         cop_total: Total cop score.
         thief_total: Total thief score.
         num_sub_games: Sub-games played.
+        conversation_log: Per-turn move/message log to append.
 
     Returns:
         Formatted plain-text body string.
     """
-    return "\n".join([
+    lines = [
         f"Game Report from: {player_name}",
         f"Series ID:        {series_id}",
         f"Sub-games played: {num_sub_games}",
@@ -91,4 +95,7 @@ def _build_body(
         f"*** WINNER: {winner_name} ***",
         "",
         "Sent automatically by the Cop & Thief MCP game engine.",
-    ])
+    ]
+    if conversation_log:
+        lines += ["", "--- Game Conversation ---", conversation_log]
+    return "\n".join(lines)
