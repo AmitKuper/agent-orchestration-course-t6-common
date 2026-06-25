@@ -98,8 +98,8 @@ class Game(GameRules):
     def get_state(self, actor: str) -> ObservationState:
         """Return actor-scoped observation state with partial observation enforced.
 
-        The opponent position is hidden (set to None) when the Chebyshev
-        distance exceeds view_radius from mechanics (default DEFAULT_VIEW_RADIUS).
+        The thief always sees the cop. The cop sees the thief only when the
+        Chebyshev distance is within view_radius (default DEFAULT_VIEW_RADIUS).
 
         Args:
             actor: "cop" or "thief".
@@ -120,7 +120,8 @@ class Game(GameRules):
             barriers_remaining = None
         view_radius = int(s.mechanics.get("view_radius", DEFAULT_VIEW_RADIUS))
         chebyshev = max(abs(my_pos[0] - opp_pos[0]), abs(my_pos[1] - opp_pos[1]))
-        visible_opp = opp_pos if chebyshev <= view_radius else None
+        # Thief always sees the cop; partial observation applies to cop only.
+        visible_opp = opp_pos if actor != COP or chebyshev <= view_radius else None
         return ObservationState(
             actor=actor, round=s.round, my_pos=my_pos, opponent_pos=visible_opp,
             barriers=list(s.barriers), legal_moves=self._compute_legal_moves(actor),
