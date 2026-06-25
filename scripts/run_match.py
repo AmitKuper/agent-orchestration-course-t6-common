@@ -629,10 +629,12 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
         parent_src = str(_REPO_ROOT.parent / "src")
         existing_pypath = os.environ.get("PYTHONPATH", "")
         extra_pypath = parent_src + (os.pathsep + existing_pypath if existing_pypath else "")
-        env_a = {**env_a, "ACTOR_CLASS": actor_class,
-                 "ACTOR_TABLE": str(mdir / "thief_qtable.npy"), "PYTHONPATH": extra_pypath}
-        env_b = {**env_b, "ACTOR_CLASS": actor_class,
-                 "ACTOR_TABLE": str(mdir / "cop_qtable.npy"), "PYTHONPATH": extra_pypath}
+        tables = {
+            "COP_ACTOR_TABLE": str(mdir / "cop_qtable.npy"),
+            "THIEF_ACTOR_TABLE": str(mdir / "thief_qtable.npy"),
+        }
+        env_a = {**env_a, "ACTOR_CLASS": actor_class, **tables, "PYTHONPATH": extra_pypath}
+        env_b = {**env_b, "ACTOR_CLASS": actor_class, **tables, "PYTHONPATH": extra_pypath}
 
     # When local_url is given the caller owns server A — skip spawn and teardown.
     attach_mode = bool(local_url)

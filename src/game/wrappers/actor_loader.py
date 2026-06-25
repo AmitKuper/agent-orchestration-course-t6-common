@@ -33,7 +33,12 @@ def load_actor_backend(role: str) -> BaseActor:
         return RandomActorBackend()
     module_path, class_name = actor_class_path.rsplit(".", 1)
     actor_cls = getattr(importlib.import_module(module_path), class_name)
-    table_path = os.environ.get("ACTOR_TABLE")
+    # Prefer role-specific table (COP_ACTOR_TABLE / THIEF_ACTOR_TABLE); fall
+    # back to the legacy single-table ACTOR_TABLE for backward compatibility.
+    table_path = (
+        os.environ.get(f"{role.upper()}_ACTOR_TABLE")
+        or os.environ.get("ACTOR_TABLE")
+    )
     if table_path and hasattr(actor_cls, "load"):
         return actor_cls.load(role=role, path=table_path)
     try:
