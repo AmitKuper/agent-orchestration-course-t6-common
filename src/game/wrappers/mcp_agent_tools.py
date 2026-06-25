@@ -1,10 +1,4 @@
-"""MCP agent-facing game tools — get_state and take_action.
-
-These tools are intended for use by the LLM orchestrator (run_match.py) in a
-tool-use loop. The LLM calls get_state to observe the board, then take_action
-to submit its chosen move. The server forwards the action to the opponent and
-validates state hashes — the LLM never talks to the opponent directly.
-"""
+"""MCP agent-facing game tools — get_state, take_action, get_actor_action."""
 
 from __future__ import annotations
 
@@ -73,11 +67,7 @@ GAME_TOOLS: list[dict] = [
 
 
 def register_agent_tools(mcp: FastMCP) -> None:
-    """Register get_state and take_action MCP tools on the given server.
-
-    The LLM client drives the turn loop — it calls get_state to observe the
-    board and take_action to submit a move.  The server applies the action,
-    forwards it to the opponent, and validates state hashes.
+    """Register get_state, take_action, and get_actor_action on the MCP server.
 
     Args:
         mcp: The FastMCP server instance to attach tools to.
