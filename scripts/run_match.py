@@ -181,13 +181,13 @@ async def _propose_match(client: object, args: dict) -> None:
     Older server versions don't accept view_radius or initiator_url.
     """
     from fastmcp.exceptions import ToolError
-    _OPTIONAL = ("view_radius", "initiator_url", "max_moves")
+    _optional = ("view_radius", "initiator_url", "max_moves")
     try:
         await client.call_tool("propose_match_tool", args)
     except ToolError as exc:
         err = str(exc)
-        if "unexpected" in err.lower() and any(k in err for k in _OPTIONAL):
-            stripped = {k: v for k, v in args.items() if k not in _OPTIONAL}
+        if "unexpected" in err.lower() and any(k in err for k in _optional):
+            stripped = {k: v for k, v in args.items() if k not in _optional}
             await client.call_tool("propose_match_tool", stripped)
         else:
             raise
@@ -308,8 +308,8 @@ async def _actor_game_loop(
     consec_forfeits: dict[str, int] = {"thief": 0, "cop": 0}
     last_messages: dict[str, str] = {"thief": "", "cop": ""}
 
-    async with Client(url_a + "/mcp", auth=auth) as ca, \
-               Client(url_b + "/mcp", auth=auth) as cb:
+    async with Client(url_a + "/mcp", auth=auth, timeout=turn_timeout) as ca, \
+               Client(url_b + "/mcp", auth=auth, timeout=turn_timeout) as cb:
         game_over, round_num = False, 0
         while not game_over and round_num < max_rounds:
             round_num += 1
@@ -384,8 +384,8 @@ async def _game_loop(
     caller = ToolCaller(Gatekeeper(model=model))
     auth = BearerAuth(_API_KEY)
     last_result: dict = {}
-    async with Client(url_a + "/mcp", auth=auth) as ca, \
-               Client(url_b + "/mcp", auth=auth) as cb:
+    async with Client(url_a + "/mcp", auth=auth, timeout=30.0) as ca, \
+               Client(url_b + "/mcp", auth=auth, timeout=30.0) as cb:
         game_over, round_num = False, 0
         while not game_over and round_num < max_rounds:
             round_num += 1
@@ -458,11 +458,11 @@ async def _run_series(
                           "grid_size": list(grid), "view_radius": view_radius,
                           "max_moves": max_moves}
             auth = BearerAuth(_API_KEY)
-            async with Client(url_b + "/mcp", auth=auth) as _cb:
+            async with Client(url_b + "/mcp", auth=auth, timeout=30.0) as _cb:
                 # Tell the opponent our URL so their take_action can call back to us.
                 await _propose_match(_cb, {**match_args, "my_role": b_role,
                                            "initiator_url": url_a})
-            async with Client(url_a + "/mcp", auth=auth) as _ca:
+            async with Client(url_a + "/mcp", auth=auth, timeout=30.0) as _ca:
                 await _propose_match(_ca, {**match_args, "my_role": a_role,
                                            "initiator_url": url_b})
 
@@ -563,7 +563,7 @@ async def _notify_both_servers(
     }
     from fastmcp.exceptions import ToolError
     for url in (url_a, url_b):
-        async with Client(url + "/mcp", auth=auth) as c:
+        async with Client(url + "/mcp", auth=auth, timeout=30.0) as c:
             try:
                 result = await c.call_tool("send_game_summary", payload)
                 txt = result.content[0].text if result.content else "{}"

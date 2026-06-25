@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from dataclasses import asdict
@@ -68,6 +69,55 @@ GAME_TOOLS: list[dict] = [
 ]
 
 
+_OPP_TIMEOUT = 30.0  # seconds; avoids hung TCP connections to unresponsive opponents
+_RECV_RETRIES = 3    # retry attempts before declaring comm_error
+
+
+async def _call_opponent(
+    opp_url: str, api_key: str, game_id: str,
+    actor: str, action: str, message: str,
+) -> tuple[str | None, str | None]:
+    """Forward action to opponent with per-call timeout and retry.
+
+    Args:
+        opp_url: Opponent MCP base URL (no trailing slash, no /mcp suffix).
+        api_key: Bearer token for outbound requests.
+        game_id: The active game identifier.
+        actor: "cop" or "thief".
+        action: Move direction or BARRIER.
+        message: Natural-language intent message.
+
+    Returns:
+        (opp_hash, None) on success, (None, error_string) after all retries fail.
+    """
+    from fastmcp import Client
+    from fastmcp.client.auth.bearer import BearerAuth
+
+    auth = BearerAuth(api_key)
+    last_err: str | None = None
+    for attempt in range(_RECV_RETRIES):
+        try:
+            async with Client(opp_url + "/mcp", auth=auth, timeout=_OPP_TIMEOUT) as opp:
+                recv = await opp.call_tool("receive_action", {
+                    "game_id": game_id, "actor": actor,
+                    "action": action, "message": message,
+                })
+                recv_data = json.loads(recv.content[0].text if recv.content else "{}")
+                if "success" not in recv_data:
+                    last_err = f"receive_action: {recv_data.get('error')}"
+                    if attempt < _RECV_RETRIES - 1:
+                        await asyncio.sleep(2.0)
+                    continue
+                hr = await opp.call_tool("get_hash", {"game_id": game_id})
+                opp_h = json.loads(hr.content[0].text if hr.content else "{}").get("hash", "")
+            return opp_h, None
+        except Exception as exc:
+            last_err = str(exc)
+            if attempt < _RECV_RETRIES - 1:
+                await asyncio.sleep(2.0)
+    return None, last_err
+
+
 def register_agent_tools(mcp: FastMCP) -> None:
     """Register get_state, take_action, and get_actor_action on the MCP server.
 
@@ -120,9 +170,6 @@ def register_agent_tools(mcp: FastMCP) -> None:
         Returns:
             JSON ActionResult extended with hash_match boolean.
         """
-        from fastmcp import Client
-        from fastmcp.client.auth.bearer import BearerAuth
-
         from game.sdk.sdk import state_hash as sdk_hash
         from game.sdk.sdk import submit_action as sdk_submit_action
         from game.wrappers.mcp_state import games_base, server_state
@@ -136,37 +183,23 @@ def register_agent_tools(mcp: FastMCP) -> None:
                 record_message(game_id, actor, message)
             response = asdict(result)
             if result.success:
-                try:
-                    # Prefer URL learned from propose_match_tool over env var.
-                    match_meta = server_state.get("matches", {}).get(game_id, {})
-                    opp_url = (
-                        match_meta.get("opponent_url")
-                        or os.environ.get("OPPONENT_MCP_URL", "")
-                    ).rstrip("/")
-                    if not opp_url:
-                        raise RuntimeError("OPPONENT_MCP_URL not set")
-                    auth = BearerAuth(os.environ.get("MCP_API_KEY", ""))
-                    async with Client(opp_url + "/mcp", auth=auth) as opp:
-                        recv = await opp.call_tool("receive_action", {
-                            "game_id": game_id, "actor": actor,
-                            "action": action, "message": message or "",
-                        })
-                        recv_data = json.loads(
-                            recv.content[0].text if recv.content else "{}"
-                        )
-                        # ActionResult always has an "error" key (nullable); only
-                        # treat it as a tool-level failure when "success" is absent.
-                        if "success" not in recv_data:
-                            response["comm_error"] = f"receive_action: {recv_data.get('error')}"
-                            return json.dumps(response)
-                        hr = await opp.call_tool("get_hash", {"game_id": game_id})
-                        opp_h = json.loads(
-                            hr.content[0].text if hr.content else "{}"
-                        ).get("hash", "")
-                    local_h = sdk_hash(game_id, games_base())
-                    response["hash_match"] = local_h == opp_h
-                except Exception as comm_err:
-                    response["comm_error"] = str(comm_err)
+                match_meta = server_state.get("matches", {}).get(game_id, {})
+                opp_url = (
+                    match_meta.get("opponent_url")
+                    or os.environ.get("OPPONENT_MCP_URL", "")
+                ).rstrip("/")
+                if opp_url:
+                    opp_h, err = await _call_opponent(
+                        opp_url, os.environ.get("MCP_API_KEY", ""),
+                        game_id, actor, action, message or "",
+                    )
+                    if err:
+                        response["comm_error"] = err
+                    else:
+                        local_h = sdk_hash(game_id, games_base())
+                        response["hash_match"] = local_h == opp_h
+                else:
+                    response["comm_error"] = "OPPONENT_MCP_URL not set"
             return json.dumps(response)
         except Exception as exc:
             return json.dumps({"error": str(exc)})
