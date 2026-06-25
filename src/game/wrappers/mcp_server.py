@@ -8,17 +8,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
-from dataclasses import asdict
 from pathlib import Path
 
 from fastmcp import FastMCP
 
-from game.sdk.sdk import get_state as sdk_get_state
 from game.sdk.sdk import new_game as sdk_new_game
-from game.sdk.sdk import state_hash as sdk_hash
-from game.sdk.sdk import submit_action as sdk_submit_action
 from game.wrappers.mcp_agent_tools import register_agent_tools
 from game.wrappers.mcp_prompts import register_prompts
 from game.wrappers.mcp_resources import register_resources
@@ -35,50 +30,24 @@ register_prompts(mcp)
 register_resources(mcp)
 
 
-def _create_actor_wrapper(role: str) -> object:
-    """Return an actor wrapper based on env-var priority.
-
-    Priority:
-      1. ACTOR_CLASS=<module>.<ClassName> — dynamically import and wrap that BaseActor subclass.
-      2. ANTHROPIC_API_KEY or OLLAMA_BASE_URL — LLMActorWrapper.
-      3. Fallback — RandomActorBackend.
-
-    Args:
-        role: "cop" or "thief".
-
-    Returns:
-        An ActorWrapper-compatible object with get_action(obs) -> (action, message).
-    """
-    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OLLAMA_BASE_URL")):
-        raise RuntimeError(
-            "No LLM configured. Set ANTHROPIC_API_KEY (Anthropic) or OLLAMA_BASE_URL (Ollama)."
-        )
-    actor_class_path = os.environ.get("ACTOR_CLASS")
-    if actor_class_path:
-        import importlib  # noqa: PLC0415
-
-        from actor.llm_message_wrapper import create_llm_message_wrapper
-        module_path, class_name = actor_class_path.rsplit(".", 1)
-        actor_cls = getattr(importlib.import_module(module_path), class_name)
-        table_path = os.environ.get("ACTOR_TABLE")
-        if table_path and hasattr(actor_cls, "load"):
-            actor = actor_cls.load(role=role, path=table_path)
-        else:
-            try:
-                actor = actor_cls(role=role)
-            except TypeError:
-                actor = actor_cls()
-        return create_llm_message_wrapper(actor, role)
-    from actor.llm_actor import create_llm_wrapper
-    return create_llm_wrapper(role)
-
-
 @mcp.tool()
 def new_game_tool(
     game_id: str, cop_col: int, cop_row: int,
     thief_col: int, thief_row: int, seed: int,
 ) -> str:
-    """Create a new game with pre-agreed positions (called after match setup)."""
+    """Create a new game with pre-agreed positions (called after match setup).
+
+    Args:
+        game_id: The agreed game identifier (also becomes the directory name).
+        cop_col: Cop starting column.
+        cop_row: Cop starting row.
+        thief_col: Thief starting column.
+        thief_row: Thief starting row.
+        seed: Shared random seed recorded in the game log.
+
+    Returns:
+        JSON with "game_id" key, or {"error": ...} on failure.
+    """
     try:
         result = sdk_new_game(
             grid_size=(5, 5),
@@ -94,35 +63,6 @@ def new_game_tool(
                 shutil.move(str(src), str(games_base() / game_id))
         _patch_state_game_id(game_id)
         return json.dumps({"game_id": game_id})
-    except Exception as exc:
-        return json.dumps({"error": str(exc)})
-
-
-@mcp.tool()
-def take_turn(game_id: str, actor: str) -> str:
-    """Decide and submit one turn: get state, call actor, submit, forward, validate hash."""
-    from game.wrappers.mcp_client import fetch_hash, send_receive_action
-
-    try:
-        obs = sdk_get_state(game_id, actor, games_base())
-        wrapper = _create_actor_wrapper(actor)
-        action, message = wrapper.get_action(obs)
-        result = sdk_submit_action(game_id, actor, action,
-                                   message=message, games_base=games_base())
-        response = asdict(result)
-
-        if result.success:
-            try:
-                send_receive_action(game_id, actor, action, message)
-                local_h = sdk_hash(game_id, games_base())
-                opp_h = fetch_hash(game_id)
-                response["hash_match"] = (local_h == opp_h)
-                response["local_hash"] = local_h
-                response["opponent_hash"] = opp_h
-            except Exception as comm_err:
-                response["comm_error"] = str(comm_err)
-
-        return json.dumps(response)
     except Exception as exc:
         return json.dumps({"error": str(exc)})
 

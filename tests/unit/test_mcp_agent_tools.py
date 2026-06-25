@@ -89,3 +89,41 @@ def test_game_tools_take_action_requires_action() -> None:
     """take_action tool definition lists 'action' as a required field."""
     take_action = next(t for t in GAME_TOOLS if t["name"] == "take_action")
     assert "action" in take_action["input_schema"]["required"]
+
+
+def test_game_tools_contains_get_actor_action() -> None:
+    """GAME_TOOLS includes get_actor_action definition."""
+    names = {t["name"] for t in GAME_TOOLS}
+    assert "get_actor_action" in names
+
+
+def test_register_agent_tools_registers_get_actor_action() -> None:
+    """register_agent_tools adds get_actor_action to the MCP server."""
+    registry = _register(MagicMock())
+    assert "get_actor_action" in registry
+
+
+def test_get_actor_action_returns_error_for_missing_game() -> None:
+    """get_actor_action returns JSON error when game does not exist."""
+    registry = _register(MagicMock())
+    with tempfile.TemporaryDirectory() as tmp:
+        with patch("game.wrappers.mcp_state.server_state", {"games_base": Path(tmp)}):
+            result = json.loads(registry["get_actor_action"](game_id="no_game", actor="cop"))
+    assert "error" in result
+
+
+def test_get_actor_action_returns_action_for_live_game() -> None:
+    """get_actor_action returns a legal action for an active game."""
+    from game.sdk.sdk import new_game as sdk_new_game
+
+    registry = _register(MagicMock())
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        sdk_new_game(grid_size=(5, 5), cop_pos=(0, 0), thief_pos=(4, 4),
+                     seed=1, games_base=base)
+        game_id = next(p.name for p in base.iterdir())
+        with patch("game.wrappers.mcp_state.server_state", {"games_base": base}):
+            result = json.loads(registry["get_actor_action"](game_id=game_id, actor="thief"))
+    assert "action" in result
+    assert "legal_moves" in result
+    assert result["action"] in result["legal_moves"]

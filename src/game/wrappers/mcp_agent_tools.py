@@ -12,6 +12,8 @@ import json
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
+from game.wrappers.actor_loader import load_actor_backend
+
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
@@ -49,6 +51,22 @@ GAME_TOOLS: list[dict] = [
                 "message": {"type": "string", "description": "Brief intent message."},
             },
             "required": ["game_id", "actor", "action"],
+        },
+    },
+    {
+        "name": "get_actor_action",
+        "description": (
+            "Get the actor backend's recommended action without applying it. "
+            "Orchestrator uses this to retrieve the Q-table decision, then generates "
+            "a NL message client-side before calling take_action (PRD §6)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "game_id": {"type": "string", "description": "The game identifier."},
+                "actor": {"type": "string", "description": "'cop' or 'thief'."},
+            },
+            "required": ["game_id", "actor"],
         },
     },
 ]
@@ -116,5 +134,25 @@ def register_agent_tools(mcp: FastMCP) -> None:
                 except Exception as comm_err:
                     response["comm_error"] = str(comm_err)
             return json.dumps(response)
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
+    @mcp.tool()
+    def get_actor_action(game_id: str, actor: str) -> str:
+        """Return the actor backend's action recommendation without applying it.
+
+        Args:
+            game_id: The active game identifier.
+            actor: "cop" or "thief".
+
+        Returns:
+            JSON with "action" and "legal_moves" keys, or {"error": ...} on failure.
+        """
+        from game.sdk.sdk import get_state as sdk_get_state
+        from game.wrappers.mcp_state import games_base
+        try:
+            obs = sdk_get_state(game_id, actor, games_base())
+            action = load_actor_backend(actor).get_action(obs)
+            return json.dumps({"action": action, "legal_moves": obs.legal_moves})
         except Exception as exc:
             return json.dumps({"error": str(exc)})

@@ -219,18 +219,24 @@
 ---
 
 ## Phase 14 — Production Hardening 🚧 In Progress
-> Needed for full production run; deferred until the pipeline is proven end-to-end.
 
-- [x] `state_hash` cross-engine validation after every turn — `hash_match` checked in `take_turn`
+- [x] `state_hash` cross-engine validation after every turn — `hash_match` in `take_action`
 - [x] Shared `random_seed` for start positions — agreed at match setup via `propose_match`
+- [x] **PRD §6 compliance — LLM lives in orchestrator, not server:**
+  - [x] `src/game/wrappers/actor_loader.py` — pure Q-table backend loader (no LLM)
+  - [x] `mcp_agent_tools.py` — `get_actor_action` tool: returns Q-table action without LLM
+  - [x] `mcp_server.py` — removed `take_turn` + `_create_actor_wrapper` (were calling LLM inside server)
+  - [x] `scripts/run_match.py` — `_actor_game_loop` rewritten: get_actor_action → LLM here → take_action
+- [x] **Full 6-sub-game series with role alternation (PRD §4):**
+  - [x] `run_match.py` runs 6 sub-games per series, alternating server_a/server_b roles
+  - [x] Seed increments per sub-game (sg_seed = seed + sg_n - 1)
+  - [x] Scores accumulated; totals printed after series
+- [x] Gmail reporting wired in `run_match.py` — `_maybe_send_report` called after 6 sub-games
 - [ ] Partial observation — `view_radius` (Chebyshev) filtering in `get_state`
   - [ ] Opponent position hidden when outside `view_radius`
   - [ ] Barriers outside radius hidden
   - [ ] Hidden state must never leak into Actor
-- [ ] Scoring accumulation across 6 sub-games (match-level state, not sub-game-level)
-- [ ] Full match orchestration loop:
-  - [ ] 6 sub-games, role alternation each sub-game
-  - [ ] Technical loss detection → void sub-game, re-run
-  - [ ] `max_consecutive_forfeits` → technical loss
+- [ ] Technical loss detection → void sub-game, re-run
+- [ ] `max_consecutive_forfeits` → technical loss
 - [ ] Deploy both MCP servers to cloud (e.g. Prefect) with public URLs
 - [ ] Bonus inter-group game support (3+3 role split, PRD §12)

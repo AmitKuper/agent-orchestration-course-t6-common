@@ -17,9 +17,17 @@ if TYPE_CHECKING:
     from game.shared.gatekeeper import Gatekeeper
     from game.state import ObservationState
 
+_DIRECTION_NAMES: dict[str, str] = {
+    "N": "north", "NE": "northeast", "E": "east", "SE": "southeast",
+    "S": "south", "SW": "southwest", "W": "west", "NW": "northwest",
+    "BARRIER": "barrier",
+}
+
 _MESSAGE_PROMPT = (
-    "You are the {role}. You just decided to play: {action}. "
-    "In one sentence, explain your tactical reasoning."
+    "You chose action {action}. "
+    "Complete this sentence with 1-3 words and nothing else: "
+    "'Moving {direction}___.' "
+    "Your reply must start with 'Moving {direction}'."
 )
 
 
@@ -48,7 +56,8 @@ class LLMMessageWrapper(ActorWrapper):
         Returns:
             LLM-generated NL message string.
         """
-        prompt = _MESSAGE_PROMPT.format(role=self._role, action=action)
+        direction = _DIRECTION_NAMES.get(action, action.lower())
+        prompt = _MESSAGE_PROMPT.format(action=action, direction=direction)
         return self._gk.call(
             [{"role": "user", "content": prompt}], system=self._system
         ).strip()
