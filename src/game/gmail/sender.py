@@ -62,6 +62,22 @@ def _create_message(to: str, body: str) -> dict[str, str]:
     return {"raw": raw}
 
 
+def send_email(to: str, subject: str, body: str) -> None:
+    """Send a plain-text email via the Gmail API.
+
+    Args:
+        to: Recipient email address.
+        subject: Email subject line.
+        body: Plain-text body content.
+    """
+    service = _build_gmail_service()
+    mime = MIMEText(body, "plain", "utf-8")
+    mime["to"] = to
+    mime["subject"] = subject
+    raw = base64.urlsafe_b64encode(mime.as_bytes()).decode("utf-8")
+    service.users().messages().send(userId="me", body={"raw": raw}).execute()
+
+
 def _build_gmail_service() -> object:
     """Build an authenticated Gmail API service object.
 

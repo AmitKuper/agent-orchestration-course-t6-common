@@ -385,6 +385,34 @@ async def _run_series(
     return sub_games
 
 
+async def _notify_both_servers(
+    url_a: str, url_b: str, series_id: str,
+    winner_name: str, cop_total: int, thief_total: int, num_sg: int,
+) -> None:
+    """Call send_game_summary on both servers so each sends its own result email.
+
+    Args:
+        url_a: Server A base URL.
+        url_b: Server B base URL.
+        series_id: Match series identifier.
+        winner_name: Display name of the winning player.
+        cop_total: Total cop score.
+        thief_total: Total thief score.
+        num_sg: Number of valid sub-games played.
+    """
+    auth = BearerAuth(_API_KEY)
+    payload = {
+        "series_id": series_id, "winner_name": winner_name,
+        "cop_total": cop_total, "thief_total": thief_total,
+        "num_sub_games": num_sg,
+    }
+    for url in (url_a, url_b):
+        async with Client(url + "/mcp", auth=auth) as c:
+            result = await c.call_tool("send_game_summary", payload)
+            txt = result.content[0].text if result.content else "{}"
+            print(f"[gmail] {url}: {txt}")
+
+
 def _maybe_send_report(sub_games: list[dict], series_id: str,
                        game_type: str = "internal") -> None:
     """Send the match report via Gmail if GMAIL_ENABLED=true and GMAIL_RECIPIENT is set."""
@@ -411,10 +439,15 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
     series_id = f"series{seed:04d}"
     print(f"[match] seed={seed} series_id={series_id} mode={mode} game_type={game_type}")
 
+    player_a = os.environ.get("PLAYER_A_NAME", "Player A")
+    player_b = os.environ.get("PLAYER_B_NAME", "Player B")
+
     env_a = {**os.environ, "OPPONENT_MCP_URL": "http://localhost:8002",
-             "MCP_API_KEY": _API_KEY, "MCP_ALLOWED_API_KEYS": _API_KEY}
+             "MCP_API_KEY": _API_KEY, "MCP_ALLOWED_API_KEYS": _API_KEY,
+             "PLAYER_NAME": player_a}
     env_b = {**os.environ, "OPPONENT_MCP_URL": "http://localhost:8001",
-             "MCP_API_KEY": _API_KEY, "MCP_ALLOWED_API_KEYS": _API_KEY}
+             "MCP_API_KEY": _API_KEY, "MCP_ALLOWED_API_KEYS": _API_KEY,
+             "PLAYER_NAME": player_b}
 
     if mode == "actor":
         mdir = Path(models_dir)
@@ -441,6 +474,19 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
         thief_total = sum(sg["scores"]["thief"] for sg in sub_games)
         print(f"\n[series] totals: cop={cop_total}  thief={thief_total}")
         _maybe_send_report(sub_games, series_id, game_type)
+
+        # Compute per-server totals to determine winner by name
+        a_total, b_total = 0, 0
+        for sg in sub_games:
+            a_role = _sg_role(sg["sub_game"], game_type)
+            b_role = "cop" if a_role == "thief" else "thief"
+            a_total += sg["scores"].get(a_role, 0)
+            b_total += sg["scores"].get(b_role, 0)
+        winner_name = player_a if a_total >= b_total else player_b
+        await _notify_both_servers(
+            url_a, url_b, series_id, winner_name,
+            cop_total, thief_total, len(sub_games),
+        )
 
     finally:
         proc_a.terminate()
