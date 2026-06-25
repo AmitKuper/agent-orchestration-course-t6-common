@@ -13,6 +13,9 @@ dependencies = [
     "crewai>=0.80",
     "httpx>=0.28.1",
     "anthropic>=0.111.0",
+    "google-auth>=2.55.0",
+    "google-auth-oauthlib>=1.4.0",
+    "google-api-python-client>=2.198.0",
 ]
 
 [project.scripts]
