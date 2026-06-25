@@ -83,14 +83,19 @@ def _derive_positions(seed: int, grid: tuple[int, int]) -> tuple[list[int], list
     return cop, thief
 
 
-def _start_servers(env_a: dict, env_b: dict, python: str, single: bool = False) -> tuple:
-    """Launch server A (port 8001) and optionally server B (port 8002).
+def _start_servers(
+    env_a: dict, env_b: dict, python: str,
+    single: bool = False, port_a: int = 8001, port_b: int = 8002,
+) -> tuple:
+    """Launch server A and optionally server B on configurable ports.
 
     Args:
         env_a: Environment for server A.
         env_b: Environment for server B (ignored when single=True).
         python: Python executable path.
         single: If True, only start server A (opponent is external).
+        port_a: Port for server A (default 8001).
+        port_b: Port for server B (default 8002).
 
     Returns:
         (proc_a, proc_b) — proc_b is None when single=True.
@@ -98,13 +103,13 @@ def _start_servers(env_a: dict, env_b: dict, python: str, single: bool = False) 
     mod = "game.wrappers.mcp_server"
     cwd = str(_REPO_ROOT)
     proc_a = subprocess.Popen(
-        [python, "-m", mod, "--port", "8001", "--games-dir", "games/server_a"],
+        [python, "-m", mod, "--port", str(port_a), "--games-dir", f"games/server_{port_a}"],
         env=env_a, cwd=cwd,
     )
     if single:
         return proc_a, None
     proc_b = subprocess.Popen(
-        [python, "-m", mod, "--port", "8002", "--games-dir", "games/server_b"],
+        [python, "-m", mod, "--port", str(port_b), "--games-dir", f"games/server_{port_b}"],
         env=env_b, cwd=cwd,
     )
     return proc_a, proc_b
@@ -588,7 +593,8 @@ def _maybe_send_report(sub_games: list[dict], series_id: str,
 
 async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
                       models_dir: str, game_type: str, num_games: int = 6,
-                      opponent_url: str = "", local_url: str = "") -> None:
+                      opponent_url: str = "", local_url: str = "",
+                      port_a: int = 8001, port_b: int = 8002) -> None:
     """Start servers, run the sub-game series, print totals, send report."""
     cfg = _load_config()
     grid_cfg = cfg.get("grid_size", [5, 5])
@@ -614,12 +620,12 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
     # Normalise opponent URL: add http:// scheme if missing.
     if opponent_url and not opponent_url.startswith("http"):
         opponent_url = "http://" + opponent_url
-    url_b = opponent_url or "http://localhost:8002"
+    url_b = opponent_url or f"http://localhost:{port_b}"
 
     env_a = {**os.environ, "OPPONENT_MCP_URL": url_b,
              "MCP_API_KEY": _API_KEY, "MCP_ALLOWED_API_KEYS": _API_KEY,
              "PLAYER_NAME": player_a}
-    env_b = {**os.environ, "OPPONENT_MCP_URL": "http://localhost:8001",
+    env_b = {**os.environ, "OPPONENT_MCP_URL": f"http://localhost:{port_a}",
              "MCP_API_KEY": _API_KEY, "MCP_ALLOWED_API_KEYS": _API_KEY,
              "PLAYER_NAME": player_b}
 
@@ -643,8 +649,10 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
         proc_a, proc_b = None, None
         url_a = local_url if local_url.startswith("http") else "http://" + local_url
     else:
-        proc_a, proc_b = _start_servers(env_a, env_b, sys.executable, single=single)
-        url_a = "http://localhost:8001"
+        proc_a, proc_b = _start_servers(
+            env_a, env_b, sys.executable, single=single, port_a=port_a, port_b=port_b,
+        )
+        url_a = f"http://localhost:{port_a}"
     try:
         print("[match] waiting for servers...")
         if not attach_mode:
@@ -706,10 +714,15 @@ def main() -> None:
                         help="External opponent MCP URL — skips starting server B locally")
     parser.add_argument("--local-url", default="",
                         help="URL of an already-running local server — skips starting server A")
+    parser.add_argument("--port-a", type=int, default=8001,
+                        help="Port for server A (default 8001)")
+    parser.add_argument("--port-b", type=int, default=8002,
+                        help="Port for server B (default 8002)")
     args = parser.parse_args()
     asyncio.run(_async_main(args.seed, args.max_rounds, args.mode,
                             args.actor_class, args.models_dir, args.game_type,
-                            args.num_games, args.opponent_url, args.local_url))
+                            args.num_games, args.opponent_url, args.local_url,
+                            args.port_a, args.port_b))
 
 
 if __name__ == "__main__":
