@@ -77,18 +77,28 @@ def register_agent_tools(mcp: FastMCP) -> None:
     def get_state(game_id: str, actor: str) -> str:
         """Return the current ObservationState as JSON.
 
+        Includes opponent_last_message so LLM agents can reason from
+        the opponent's natural-language intent, not just grid positions.
+
         Args:
             game_id: The active game identifier.
             actor: "cop" or "thief".
 
         Returns:
-            JSON ObservationState including position, legal moves, and barriers.
+            JSON ObservationState including position, legal moves, barriers,
+            and the opponent's last natural-language message.
         """
+        import dataclasses
+
         from game.sdk.sdk import get_state as sdk_get_state
+        from game.wrappers.mcp_message_store import get_opponent_message
         from game.wrappers.mcp_state import games_base
 
         try:
             obs = sdk_get_state(game_id, actor, games_base())
+            opp_msg = get_opponent_message(game_id, actor)
+            if opp_msg:
+                obs = dataclasses.replace(obs, opponent_last_message=opp_msg)
             return json.dumps(asdict(obs))
         except Exception as exc:
             return json.dumps({"error": str(exc)})
@@ -120,6 +130,9 @@ def register_agent_tools(mcp: FastMCP) -> None:
             result = sdk_submit_action(
                 game_id, actor, action, message=message, games_base=games_base()
             )
+            if message:
+                from game.wrappers.mcp_message_store import record_message
+                record_message(game_id, actor, message)
             response = asdict(result)
             if result.success:
                 try:

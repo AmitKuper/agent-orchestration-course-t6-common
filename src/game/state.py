@@ -37,6 +37,7 @@ class ObservationState:
     barriers: list[tuple[int, int]]
     legal_moves: list[str]
     barriers_remaining: int | None
+    opponent_last_message: str | None = None
 
     def to_json(self) -> str:
         """Serialize to JSON string."""
@@ -50,4 +51,5 @@ class ObservationState:
         if d["opponent_pos"] is not None:
             d["opponent_pos"] = tuple(d["opponent_pos"])
         d["barriers"] = [tuple(b) for b in d["barriers"]]
+        d.setdefault("opponent_last_message", None)
         return cls(**d)

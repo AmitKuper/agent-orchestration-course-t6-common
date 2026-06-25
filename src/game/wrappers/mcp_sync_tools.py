@@ -43,11 +43,14 @@ def register_sync_tools(mcp: FastMCP) -> None:
             JSON ActionResult dict, or {"error": ...} on failure.
         """
         from game.sdk.sdk import submit_action as sdk_submit_action
+        from game.wrappers.mcp_message_store import record_message
         try:
             result = sdk_submit_action(
                 game_id, actor, action,
                 message=message or None, games_base=games_base(),
             )
+            if message:
+                record_message(game_id, actor, message)
             return json.dumps(asdict(result))
         except Exception as exc:
             return json.dumps({"error": str(exc)})
@@ -91,6 +94,9 @@ def register_sync_tools(mcp: FastMCP) -> None:
         """
         from game.sdk.sdk import new_game as sdk_new_game
         try:
+            dest = games_base() / game_id
+            if dest.exists():
+                shutil.rmtree(str(dest))
             result = sdk_new_game(
                 grid_size=tuple(grid_size),
                 cop_pos=tuple(cop_pos),
