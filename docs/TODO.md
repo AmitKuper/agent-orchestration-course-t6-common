@@ -218,7 +218,7 @@
 
 ---
 
-## Phase 14 — Production Hardening 🚧 In Progress
+## Phase 14 — Production Hardening 🚧 In Progress (MCP architecture complete)
 
 - [x] `state_hash` cross-engine validation after every turn — `hash_match` in `take_action`
 - [x] Shared `random_seed` for start positions — agreed at match setup via `propose_match`
@@ -245,6 +245,16 @@
   - [x] `run_match.py` reads `grid_size`, `turn_timeout_seconds`, `max_consecutive_forfeits` from config
   - [x] `setup.json` updated to reference `config/config.json`
 - [x] **Bonus 3+3 role split (PRD §12):** `_sg_role()` returns cop/cop/cop/thief/thief/thief for bonus mode
+- [x] **Full MCP protocol for ALL inter-server calls (Phase 14b):**
+  - [x] `mcp_sync_tools.py` — `receive_action`, `get_hash`, `propose_match_tool` as real MCP tools (replaced REST routes)
+  - [x] `mcp_agent_tools.py` — `take_action` now `async def`; uses FastMCP `Client` to call opponent's MCP tools
+  - [x] `mcp_routes.py` — gutted to `/health` only (all game sync via MCP now)
+  - [x] `run_match.py` — `propose_match` calls via FastMCP `Client`; removed `_post()` REST helper
+  - [x] `mcp_client.py` — deleted (was REST-only; superseded by FastMCP `Client` calls)
+  - [x] `tests/unit/test_mcp_sync_tools.py` — 7 tests for new sync tools
+  - [x] `tests/unit/test_mcp_agent_tools.py` — updated async `take_action` test
+  - [x] 203 tests pass, 0 Ruff violations
+  - [x] End-to-end 2-game match verified (all `/mcp` calls, `hash_match: True`)
 - [ ] Partial observation — `view_radius` (Chebyshev) filtering in `get_state`
   - [ ] Opponent position hidden when outside `view_radius`
   - [ ] Barriers outside radius hidden

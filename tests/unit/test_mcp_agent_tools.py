@@ -76,11 +76,12 @@ def test_get_state_returns_observation_for_live_game() -> None:
 
 def test_take_action_returns_error_for_missing_game() -> None:
     """take_action returns JSON error when game does not exist."""
+    import asyncio
     registry = _register(MagicMock())
     with tempfile.TemporaryDirectory() as tmp:
         with patch("game.wrappers.mcp_state.server_state", {"games_base": Path(tmp)}):
             result = json.loads(
-                registry["take_action"](game_id="no_game", actor="cop", action="E")
+                asyncio.run(registry["take_action"](game_id="no_game", actor="cop", action="E"))
             )
     assert "error" in result
 

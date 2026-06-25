@@ -17,8 +17,9 @@ from game.sdk.sdk import new_game as sdk_new_game
 from game.wrappers.mcp_agent_tools import register_agent_tools
 from game.wrappers.mcp_prompts import register_prompts
 from game.wrappers.mcp_resources import register_resources
-from game.wrappers.mcp_routes import _patch_state_game_id, register_routes
-from game.wrappers.mcp_state import games_base, server_state
+from game.wrappers.mcp_routes import register_routes
+from game.wrappers.mcp_state import games_base, patch_state_game_id, server_state
+from game.wrappers.mcp_sync_tools import register_sync_tools
 
 mcp = FastMCP(
     name="cop-thief-game",
@@ -26,6 +27,7 @@ mcp = FastMCP(
 )
 register_routes(mcp)
 register_agent_tools(mcp)
+register_sync_tools(mcp)
 register_prompts(mcp)
 register_resources(mcp)
 
@@ -61,7 +63,7 @@ def new_game_tool(
             src = games_base() / auto_id
             if src.exists():
                 shutil.move(str(src), str(games_base() / game_id))
-        _patch_state_game_id(game_id)
+        patch_state_game_id(game_id)
         return json.dumps({"game_id": game_id})
     except Exception as exc:
         return json.dumps({"error": str(exc)})

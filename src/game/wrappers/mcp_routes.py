@@ -1,96 +1,32 @@
-"""Custom REST route handlers for server-to-server communication.
+"""Custom HTTP routes for the MCP server — health check only.
 
-Registered on the FastMCP instance via register_routes(mcp) to avoid
-circular imports between mcp_server and its route handlers.
+All game synchronisation (receive_action, get_hash, propose_match_tool) is
+now exposed as standard MCP Tools in mcp_sync_tools.py so every inter-server
+call uses the real MCP protocol instead of ad-hoc REST.
 """
 
 from __future__ import annotations
 
-import json
-import shutil
-from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from game.sdk.sdk import new_game as sdk_new_game
-from game.sdk.sdk import state_hash as sdk_hash
-from game.sdk.sdk import submit_action as sdk_submit_action
-from game.wrappers.mcp_state import auth_ok, games_base, server_state
-
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
 
-def _patch_state_game_id(game_id: str) -> None:
-    """Update the game_id field in state.json after a directory rename.
-
-    When sdk_new_game creates a game with an auto-generated ID and the
-    directory is then renamed to the agreed game_id, the state.json still
-    contains the old ID. This helper fixes it so save_state writes back
-    to the correct directory.
-
-    Args:
-        game_id: The agreed game identifier (also the directory name).
-    """
-    state_file = games_base() / game_id / "state.json"
-    if state_file.exists():
-        data = json.loads(state_file.read_text(encoding="utf-8"))
-        data["game_id"] = game_id
-        state_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-
 def register_routes(mcp: FastMCP) -> None:
-    """Register all custom HTTP routes on the FastMCP instance.
+    """Register the /health route on the FastMCP instance.
 
     Args:
-        mcp: The FastMCP server instance to attach routes to.
+        mcp: The FastMCP server instance to attach the route to.
     """
-    @mcp.custom_route("/game/receive_action", methods=["POST"])
-    async def receive_action(request: Request) -> JSONResponse:
-        """Inbound: apply the opponent's action to the local engine."""
-        if not auth_ok(request):
-            return JSONResponse({"error": "Forbidden"}, status_code=403)
-        data = await request.json()
-        result = sdk_submit_action(
-            data["game_id"], data["actor"], data["action"],
-            message=data.get("message"), games_base=games_base(),
-        )
-        return JSONResponse({**asdict(result), "hash": sdk_hash(data["game_id"], games_base())})
-
-    @mcp.custom_route("/game/hash", methods=["POST"])
-    async def get_hash(request: Request) -> JSONResponse:
-        """Return the local state hash for the given game."""
-        if not auth_ok(request):
-            return JSONResponse({"error": "Forbidden"}, status_code=403)
-        data = await request.json()
-        return JSONResponse({"hash": sdk_hash(data["game_id"], games_base())})
-
-    @mcp.custom_route("/game/propose_match", methods=["POST"])
-    async def propose_match(request: Request) -> JSONResponse:
-        """Accept a match proposal and create a local game with agreed params."""
-        if not auth_ok(request):
-            return JSONResponse({"error": "Forbidden"}, status_code=403)
-        data = await request.json()
-        game_id = data["game_id"]
-        result = sdk_new_game(
-            grid_size=tuple(data.get("grid_size", [5, 5])),
-            cop_pos=tuple(data["cop_pos"]),
-            thief_pos=tuple(data["thief_pos"]),
-            seed=data["seed"],
-            games_base=games_base(),
-        )
-        auto_id = result["game_id"]
-        if auto_id != game_id and (games_base() / auto_id).exists():
-            shutil.move(str(games_base() / auto_id), str(games_base() / game_id))
-        _patch_state_game_id(game_id)
-        server_state["matches"][game_id] = {
-            "role": data.get("my_role", "cop"), "seed": data["seed"],
-        }
-        return JSONResponse({"accepted": True, "game_id": game_id})
-
     @mcp.custom_route("/health", methods=["GET"])
     async def health(_request: Request) -> JSONResponse:
-        """Health check endpoint."""
+        """Health check endpoint used by the orchestrator before match start.
+
+        Returns:
+            JSON {"status": "ok"} with HTTP 200.
+        """
         return JSONResponse({"status": "ok"})

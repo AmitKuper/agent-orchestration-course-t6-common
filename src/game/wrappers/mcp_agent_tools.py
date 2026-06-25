@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
@@ -93,8 +94,11 @@ def register_agent_tools(mcp: FastMCP) -> None:
             return json.dumps({"error": str(exc)})
 
     @mcp.tool()
-    def take_action(game_id: str, actor: str, action: str, message: str = "") -> str:
-        """Submit an action, forward it to the opponent, and validate state hashes.
+    async def take_action(game_id: str, actor: str, action: str, message: str = "") -> str:
+        """Submit an action, forward it via MCP to the opponent, validate hashes.
+
+        Uses the MCP protocol end-to-end: calls receive_action and get_hash
+        tools on the opponent server via a FastMCP Client (not plain HTTP).
 
         Args:
             game_id: The active game identifier.
@@ -105,9 +109,11 @@ def register_agent_tools(mcp: FastMCP) -> None:
         Returns:
             JSON ActionResult extended with hash_match boolean.
         """
+        from fastmcp import Client
+        from fastmcp.client.auth.bearer import BearerAuth
+
         from game.sdk.sdk import state_hash as sdk_hash
         from game.sdk.sdk import submit_action as sdk_submit_action
-        from game.wrappers.mcp_client import fetch_hash, send_receive_action
         from game.wrappers.mcp_state import games_base
 
         try:
@@ -117,9 +123,20 @@ def register_agent_tools(mcp: FastMCP) -> None:
             response = asdict(result)
             if result.success:
                 try:
-                    send_receive_action(game_id, actor, action, message)
+                    opp_url = os.environ.get("OPPONENT_MCP_URL", "").rstrip("/")
+                    if not opp_url:
+                        raise RuntimeError("OPPONENT_MCP_URL not set")
+                    auth = BearerAuth(os.environ.get("MCP_API_KEY", ""))
+                    async with Client(opp_url + "/mcp", auth=auth) as opp:
+                        await opp.call_tool("receive_action", {
+                            "game_id": game_id, "actor": actor,
+                            "action": action, "message": message or "",
+                        })
+                        hr = await opp.call_tool("get_hash", {"game_id": game_id})
+                        opp_h = json.loads(
+                            hr.content[0].text if hr.content else "{}"
+                        ).get("hash", "")
                     local_h = sdk_hash(game_id, games_base())
-                    opp_h = fetch_hash(game_id)
                     response["hash_match"] = local_h == opp_h
                 except Exception as comm_err:
                     response["comm_error"] = str(comm_err)

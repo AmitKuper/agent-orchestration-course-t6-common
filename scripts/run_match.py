@@ -65,14 +65,6 @@ def _wait_for_server(url: str, timeout: float = 20.0) -> None:
     raise RuntimeError(f"Server at {url} did not start within {timeout}s")
 
 
-def _post(url: str, path: str, body: dict) -> dict:
-    """POST JSON to a REST endpoint and return parsed response."""
-    r = httpx.post(url + path, json=body,
-                   headers={"X-API-Key": _API_KEY}, timeout=30.0)
-    r.raise_for_status()
-    return r.json()
-
-
 def _derive_positions(seed: int, grid: tuple[int, int]) -> tuple[list[int], list[int]]:
     """Derive cop and thief start positions deterministically from seed."""
     rng = random.Random(seed)
@@ -340,11 +332,14 @@ async def _run_series(
 
             a_role = _sg_role(sg_n, game_type)
             b_role = "cop" if a_role == "thief" else "thief"
-            base_prop = {"game_id": sg_id, "seed": sg_seed,
-                         "cop_pos": cop_pos, "thief_pos": thief_pos,
-                         "grid_size": list(grid)}
-            _post(url_b, "/game/propose_match", {**base_prop, "my_role": b_role})
-            _post(url_a, "/game/propose_match", {**base_prop, "my_role": a_role})
+            match_args = {"game_id": sg_id, "seed": sg_seed,
+                          "cop_pos": cop_pos, "thief_pos": thief_pos,
+                          "grid_size": list(grid)}
+            auth = BearerAuth(_API_KEY)
+            async with Client(url_b + "/mcp", auth=auth) as _cb:
+                await _cb.call_tool("propose_match_tool", {**match_args, "my_role": b_role})
+            async with Client(url_a + "/mcp", auth=auth) as _ca:
+                await _ca.call_tool("propose_match_tool", {**match_args, "my_role": a_role})
 
             thief_url = url_a if a_role == "thief" else url_b
             cop_url = url_b if a_role == "thief" else url_a
