@@ -131,8 +131,24 @@ class Game(GameRules):
         )
 
     def state_hash(self) -> str:
-        """Return an 8-char deterministic hex digest of the current state."""
-        canonical = json.dumps(self._state.to_dict(), sort_keys=True)
+        """Return an 8-char deterministic hex digest of the gameplay state.
+
+        Excludes administrative fields (game_id, mechanics, max_moves,
+        max_barriers, grid size) that can legitimately differ between server
+        versions or configurations without indicating a real state divergence.
+        """
+        s = self._state
+        canonical = json.dumps({
+            "cop_pos": list(s.cop_pos),
+            "thief_pos": list(s.thief_pos),
+            "barriers": sorted(list(b) for b in s.barriers),
+            "round": s.round,
+            "turn": s.turn,
+            "barriers_placed": s.barriers_placed,
+            "game_over": s.game_over,
+            "winner": s.winner,
+            "win_reason": s.win_reason,
+        }, sort_keys=True)
         return hashlib.sha256(canonical.encode()).hexdigest()[:8]
 
     def to_dict(self) -> dict:
