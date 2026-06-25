@@ -41,13 +41,15 @@ _SYSTEM_COP = (
     "You are the COP in a 5×5 Cop & Thief grid game. "
     "Capture the thief by landing on its cell. "
     "You may move N NE E SE S SW W NW or place BARRIER on your cell (max 5). "
-    "Call get_state to observe the board, then take_action with your move and a brief message."
+    "Call get_state to observe the board, then take_action with your move "
+    "and a one-sentence message."
 )
 _SYSTEM_THIEF = (
     "You are the THIEF in a 5×5 Cop & Thief grid game. "
     "Survive 25 rounds without being captured. "
     "You may move N NE E SE S SW W NW. No barriers. "
-    "Call get_state to observe the board, then take_action with your move and a brief message."
+    "Call get_state to observe the board, then take_action with your move "
+    "and a one-sentence message."
 )
 _DIRS: dict[str, str] = {
     "N": "north", "NE": "northeast", "E": "east", "SE": "southeast",
@@ -270,7 +272,7 @@ async def _actor_turn(
                 f"You are the {actor.upper()} in a cop-thief pursuit game. "
                 f"Opponent's last message: '{opponent_msg}'. "
                 f"You chose to move {direction}. "
-                "In 1-2 sentences describe your move and what you infer about the opponent."
+                "In one sentence describe your move."
             )
         else:
             prompt = (
