@@ -34,6 +34,7 @@ WIN_THIEF_SURVIVED = "thief_survived"
 DEFAULT_GRID_SIZE: tuple[int, int] = (5, 5)
 DEFAULT_MAX_MOVES: int = 30
 DEFAULT_MAX_BARRIERS: int = 5
+DEFAULT_VIEW_RADIUS: int = 1  # Chebyshev distance; opponent hidden beyond this
 
 # Scoring defaults (PRD §4 / §5)
 SCORE_COP_WIN: int = 20    # cop captures or thief_trapped

@@ -363,7 +363,7 @@ async def _run_series(
     url_a: str, url_b: str, mode: str, seed: int,
     max_rounds: int, game_type: str, grid: tuple[int, int],
     turn_timeout: float = 30.0, max_forfeits: int = 3,
-    num_games: int = 6,
+    num_games: int = 6, view_radius: int = 1,
 ) -> list[dict]:
     """Run num_games valid sub-games, re-running on technical loss.
 
@@ -378,6 +378,7 @@ async def _run_series(
         turn_timeout: Seconds allowed per tool call (actor mode, §3.1).
         max_forfeits: Consecutive forfeit limit before technical loss.
         num_games: Number of valid sub-games to play (default 6).
+        view_radius: Chebyshev distance within which opponent is visible.
 
     Returns:
         List of sub-game result dicts for the report.
@@ -395,7 +396,7 @@ async def _run_series(
             b_role = "cop" if a_role == "thief" else "thief"
             match_args = {"game_id": sg_id, "seed": sg_seed,
                           "cop_pos": cop_pos, "thief_pos": thief_pos,
-                          "grid_size": list(grid)}
+                          "grid_size": list(grid), "view_radius": view_radius}
             auth = BearerAuth(_API_KEY)
             async with Client(url_b + "/mcp", auth=auth) as _cb:
                 await _cb.call_tool("propose_match_tool", {**match_args, "my_role": b_role})
@@ -529,6 +530,7 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
     turn_timeout = float(cfg.get("turn_timeout_seconds", 30))
     max_forfeits = int(cfg.get("max_consecutive_forfeits", _MAX_FORFEIT_STREAK))
     num_games = num_games or int(cfg.get("num_games", 6))
+    view_radius = int(cfg.get("view_radius", 1))
     series_id = f"series{seed:04d}"
     print(f"[match] seed={seed} series_id={series_id} mode={mode} game_type={game_type}")
 
@@ -561,7 +563,7 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
         print("[match] both servers up")
 
         sub_games = await _run_series(url_a, url_b, mode, seed, max_rounds, game_type, grid,
-                                       turn_timeout, max_forfeits, num_games)
+                                       turn_timeout, max_forfeits, num_games, view_radius)
 
         cop_total = sum(sg["scores"]["cop"] for sg in sub_games)
         thief_total = sum(sg["scores"]["thief"] for sg in sub_games)

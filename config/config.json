@@ -4,7 +4,7 @@
   "num_games": 6,
   "max_barriers": 5,
   "partial_observation": true,
-  "view_radius": 2,
+  "view_radius": 1,
   "turn_timeout_seconds": 30,
   "max_illegal_retries": 2,
   "max_consecutive_forfeits": 3,
