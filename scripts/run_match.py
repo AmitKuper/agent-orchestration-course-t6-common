@@ -240,7 +240,7 @@ def _board_str(sg_id: str) -> str:
 async def _actor_turn(
     client: object, actor: str, game_id: str,
     gk: object, system: str, timeout: float,
-    opponent_msg: str = "",
+    opponent_msg: str = "", time_debug: bool = False,
 ) -> dict:
     """Execute one actor turn: get_actor_action → contextual NL message → take_action.
 
@@ -252,16 +252,23 @@ async def _actor_turn(
         system: System prompt for NL message generation.
         timeout: Per-tool-call timeout in seconds.
         opponent_msg: The opponent's last NL message, for contextual response.
+        time_debug: If True, print per-phase timing to stdout.
 
     Returns:
         ActionResult dict with "_msg" key for the sent message,
         or {"forfeit": True, "reason": ...} on timeout/error.
     """
+    def _ms(t: float) -> str:
+        return f"{int((time.perf_counter() - t) * 1000)}ms"
+
     try:
+        t0 = time.perf_counter()
         ar = await asyncio.wait_for(
             client.call_tool("get_actor_action", {"game_id": game_id, "actor": actor}),
             timeout=timeout,
         )
+        if time_debug:
+            print(f"  [perf] {actor} qtable={_ms(t0)}")
         adata = json.loads(ar.content[0].text if ar.content else "{}")
         if "error" in adata:
             return {"forfeit": True, "reason": adata["error"]}
@@ -280,7 +287,11 @@ async def _actor_turn(
                 f"and you are moving {direction}. "
                 "In one sentence describe your intent."
             )
+        t1 = time.perf_counter()
         msg = await asyncio.to_thread(gk.call, [{"role": "user", "content": prompt}], system)
+        if time_debug:
+            print(f"  [perf] {actor} llm={_ms(t1)}")
+        t2 = time.perf_counter()
         tr = await asyncio.wait_for(
             client.call_tool(
                 "take_action",
@@ -288,6 +299,8 @@ async def _actor_turn(
             ),
             timeout=timeout,
         )
+        if time_debug:
+            print(f"  [perf] {actor} take_action={_ms(t2)}  turn_total={_ms(t0)}")
         result = json.loads(tr.content[0].text if tr.content else "{}")
         if not result.get("success", True):
             return {"forfeit": True, "reason": "illegal_action"}
@@ -301,8 +314,18 @@ async def _actor_turn(
 async def _actor_game_loop(
     url_a: str, url_b: str, game_id: str, max_rounds: int,
     turn_timeout: float = 30.0, max_forfeits: int = 3,
+    time_debug: bool = False,
 ) -> dict:
     """Drive turns via _actor_turn (Q-table → NL message → take_action) per PRD §6.
+
+    Args:
+        url_a: URL of the thief server.
+        url_b: URL of the cop server.
+        game_id: Active game identifier.
+        max_rounds: Maximum rounds before thief wins.
+        turn_timeout: Per-tool-call timeout in seconds.
+        max_forfeits: Consecutive forfeits before technical loss.
+        time_debug: If True, print per-phase timing for every turn.
 
     Returns:
         Final ActionResult dict, or a technical-loss sentinel on engine divergence.
@@ -330,6 +353,7 @@ async def _actor_game_loop(
                 result = await _actor_turn(
                     client, actor, game_id, gk, system, turn_timeout,
                     opponent_msg=last_messages[opponent],
+                    time_debug=time_debug,
                 )
                 if result.get("forfeit"):
                     consec_forfeits[actor] += 1
@@ -429,6 +453,7 @@ async def _run_series(
     max_rounds: int, game_type: str, grid: tuple[int, int],
     turn_timeout: float = 30.0, max_forfeits: int = 3,
     num_games: int = 6, view_radius: int = 1, max_moves: int = 25,
+    time_debug: bool = False,
 ) -> list[dict]:
     """Run num_games valid sub-games, re-running on technical loss.
 
@@ -445,6 +470,7 @@ async def _run_series(
         num_games: Number of valid sub-games to play (default 6).
         view_radius: Chebyshev distance within which opponent is visible.
         max_moves: Engine-level round cap passed to both game engines.
+        time_debug: If True, print per-phase timing for every turn.
 
     Returns:
         List of sub-game result dicts for the report.
@@ -479,7 +505,7 @@ async def _run_series(
 
             result = (
                 await _actor_game_loop(thief_url, cop_url, sg_id, max_rounds,
-                                       turn_timeout, max_forfeits)
+                                       turn_timeout, max_forfeits, time_debug)
                 if mode == "actor"
                 else await _game_loop(thief_url, cop_url, sg_id, max_rounds)
             )
@@ -596,7 +622,8 @@ def _maybe_send_report(sub_games: list[dict], series_id: str,
 async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
                       models_dir: str, game_type: str, num_games: int = 6,
                       opponent_url: str = "", local_url: str = "",
-                      port_a: int = 8001, port_b: int = 8002) -> None:
+                      port_a: int = 8001, port_b: int = 8002,
+                      time_debug: bool = False) -> None:
     """Start servers, run the sub-game series, print totals, send report."""
     cfg = _load_config()
     grid_cfg = cfg.get("grid_size", [5, 5])
@@ -665,7 +692,7 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
 
         sub_games = await _run_series(url_a, url_b, mode, seed, max_rounds, game_type, grid,
                                        turn_timeout, max_forfeits, num_games, view_radius,
-                                       max_moves)
+                                       max_moves, time_debug)
 
         cop_total = sum(sg["scores"]["cop"] for sg in sub_games)
         thief_total = sum(sg["scores"]["thief"] for sg in sub_games)
@@ -720,11 +747,13 @@ def main() -> None:
                         help="Port for server A (default 8001)")
     parser.add_argument("--port-b", type=int, default=8002,
                         help="Port for server B (default 8002)")
+    parser.add_argument("--time-debug", action="store_true",
+                        help="Print per-phase timing (qtable/llm/take_action) for every turn")
     args = parser.parse_args()
     asyncio.run(_async_main(args.seed, args.max_rounds, args.mode,
                             args.actor_class, args.models_dir, args.game_type,
                             args.num_games, args.opponent_url, args.local_url,
-                            args.port_a, args.port_b))
+                            args.port_a, args.port_b, args.time_debug))
 
 
 if __name__ == "__main__":
