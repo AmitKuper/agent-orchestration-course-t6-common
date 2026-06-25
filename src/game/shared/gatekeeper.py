@@ -67,6 +67,9 @@ class Gatekeeper:
         else:
             base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
             self._ollama_url = base.rstrip("/") + "/api/chat"
+            # Persistent client keeps the TCP connection alive between turns,
+            # avoiding per-call connection setup overhead.
+            self._http = httpx.Client(timeout=120.0)
 
     def _enforce_rate_limit(self) -> None:
         """Sleep if necessary to stay within RPM limit."""
@@ -162,8 +165,9 @@ class Gatekeeper:
             "model": self.model,
             "messages": chat_messages,
             "stream": False,
+            "keep_alive": "10m",
         }
-        response = httpx.post(self._ollama_url, json=payload, timeout=120.0)
+        response = self._http.post(self._ollama_url, json=payload)
         response.raise_for_status()
         data = response.json()
         # Ollama returns prompt_eval_count / eval_count (not openai-style usage)
