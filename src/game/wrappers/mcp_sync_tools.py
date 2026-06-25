@@ -77,6 +77,7 @@ def register_sync_tools(mcp: FastMCP) -> None:
         cop_pos: list[int], thief_pos: list[int],
         grid_size: list[int], my_role: str,
         view_radius: int = 1,
+        max_moves: int = 30,
         initiator_url: str = "",
     ) -> str:
         """Accept a match proposal and create a local game with agreed parameters.
@@ -91,6 +92,7 @@ def register_sync_tools(mcp: FastMCP) -> None:
             grid_size: [cols, rows] grid dimensions.
             my_role: "cop" or "thief" — this server's role in the match.
             view_radius: Chebyshev distance within which opponent is visible.
+            max_moves: Maximum rounds per sub-game (win condition for thief).
             initiator_url: Base URL of the proposing server so this server can
                 call receive_action back on it (stored as opponent_url).
 
@@ -107,7 +109,7 @@ def register_sync_tools(mcp: FastMCP) -> None:
                 cop_pos=tuple(cop_pos),
                 thief_pos=tuple(thief_pos),
                 seed=seed,
-                mechanics={"view_radius": view_radius},
+                mechanics={"view_radius": view_radius, "max_moves": max_moves},
                 games_base=games_base(),
             )
             auto_id = result["game_id"]

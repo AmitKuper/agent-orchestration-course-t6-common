@@ -174,7 +174,7 @@ async def _propose_match(client: object, args: dict) -> None:
     Older server versions don't accept view_radius or initiator_url.
     """
     from fastmcp.exceptions import ToolError
-    _OPTIONAL = ("view_radius", "initiator_url")
+    _OPTIONAL = ("view_radius", "initiator_url", "max_moves")
     try:
         await client.call_tool("propose_match_tool", args)
     except ToolError as exc:
@@ -278,6 +278,7 @@ async def _actor_turn(
         if not result.get("success", True):
             return {"forfeit": True, "reason": "illegal_action"}
         result["_msg"] = msg.strip()
+        result["_action"] = action
         return result
     except TimeoutError:
         return {"forfeit": True, "reason": "timeout"}
@@ -310,6 +311,7 @@ async def _actor_game_loop(
                 (ca, "thief", _SYSTEM_THIEF),
                 (cb, "cop", _SYSTEM_COP),
             ]:
+                other = cb if client is ca else ca
                 opponent = "cop" if actor == "thief" else "thief"
                 result = await _actor_turn(
                     client, actor, game_id, gk, system, turn_timeout,
@@ -324,9 +326,28 @@ async def _actor_game_loop(
                     continue
                 consec_forfeits[actor] = 0
                 sent_msg = result.pop("_msg", "")
+                action = result.pop("_action", None)
                 if sent_msg:
                     last_messages[actor] = sent_msg
                     print(f"  {actor} says: \"{sent_msg}\"")
+                # If the server couldn't reach the opponent (NAT/network), the
+                # orchestrator applies the action on the other server directly.
+                if "comm_error" in result and action and not result.get("game_over"):
+                    try:
+                        await other.call_tool("receive_action", {
+                            "game_id": game_id, "actor": actor,
+                            "action": action, "message": sent_msg,
+                        })
+                        ha = await client.call_tool("get_hash", {"game_id": game_id})
+                        hb = await other.call_tool("get_hash", {"game_id": game_id})
+                        h1 = json.loads(ha.content[0].text if ha.content else "{}").get("hash")
+                        h2 = json.loads(hb.content[0].text if hb.content else "{}").get("hash")
+                        if h1 and h1 == h2:
+                            result.pop("comm_error")
+                            result["hash_match"] = True
+                            print(f"  [sync] orchestrator recovered sync for {actor}")
+                    except Exception as sync_err:
+                        result["comm_error"] = str(sync_err)
                 if result.get("hash_match") is False:
                     return _tech_loss("hash_mismatch")
                 if "comm_error" in result:
@@ -393,7 +414,7 @@ async def _run_series(
     url_a: str, url_b: str, mode: str, seed: int,
     max_rounds: int, game_type: str, grid: tuple[int, int],
     turn_timeout: float = 30.0, max_forfeits: int = 3,
-    num_games: int = 6, view_radius: int = 1,
+    num_games: int = 6, view_radius: int = 1, max_moves: int = 25,
 ) -> list[dict]:
     """Run num_games valid sub-games, re-running on technical loss.
 
@@ -402,13 +423,14 @@ async def _run_series(
         url_b: URL for server B.
         mode: "actor" or "llm".
         seed: Base seed; sub-game n uses seed + n - 1.
-        max_rounds: Per-sub-game round cap.
+        max_rounds: Per-sub-game round cap (orchestrator loop ceiling).
         game_type: "internal" (alternating) or "bonus" (3+3 split, PRD §12).
         grid: Grid dimensions.
         turn_timeout: Seconds allowed per tool call (actor mode, §3.1).
         max_forfeits: Consecutive forfeit limit before technical loss.
         num_games: Number of valid sub-games to play (default 6).
         view_radius: Chebyshev distance within which opponent is visible.
+        max_moves: Engine-level round cap passed to both game engines.
 
     Returns:
         List of sub-game result dicts for the report.
@@ -426,7 +448,8 @@ async def _run_series(
             b_role = "cop" if a_role == "thief" else "thief"
             match_args = {"game_id": sg_id, "seed": sg_seed,
                           "cop_pos": cop_pos, "thief_pos": thief_pos,
-                          "grid_size": list(grid), "view_radius": view_radius}
+                          "grid_size": list(grid), "view_radius": view_radius,
+                          "max_moves": max_moves}
             auth = BearerAuth(_API_KEY)
             async with Client(url_b + "/mcp", auth=auth) as _cb:
                 # Tell the opponent our URL so their take_action can call back to us.
@@ -567,6 +590,7 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
     max_forfeits = int(cfg.get("max_consecutive_forfeits", _MAX_FORFEIT_STREAK))
     num_games = num_games or int(cfg.get("num_games", 6))
     view_radius = int(cfg.get("view_radius", 1))
+    max_moves = int(cfg.get("max_moves", 25))
     series_id = f"series{seed:04d}"
     print(f"[match] seed={seed} series_id={series_id} mode={mode} game_type={game_type}")
 
@@ -614,7 +638,8 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
         print(f"[match] server(s) up — opponent: {url_b}")
 
         sub_games = await _run_series(url_a, url_b, mode, seed, max_rounds, game_type, grid,
-                                       turn_timeout, max_forfeits, num_games, view_radius)
+                                       turn_timeout, max_forfeits, num_games, view_radius,
+                                       max_moves)
 
         cop_total = sum(sg["scores"]["cop"] for sg in sub_games)
         thief_total = sum(sg["scores"]["thief"] for sg in sub_games)

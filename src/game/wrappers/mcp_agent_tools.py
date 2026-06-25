@@ -154,8 +154,10 @@ def register_agent_tools(mcp: FastMCP) -> None:
                         recv_data = json.loads(
                             recv.content[0].text if recv.content else "{}"
                         )
-                        if "error" in recv_data:
-                            response["comm_error"] = f"receive_action: {recv_data['error']}"
+                        # ActionResult always has an "error" key (nullable); only
+                        # treat it as a tool-level failure when "success" is absent.
+                        if "success" not in recv_data:
+                            response["comm_error"] = f"receive_action: {recv_data.get('error')}"
                             return json.dumps(response)
                         hr = await opp.call_tool("get_hash", {"game_id": game_id})
                         opp_h = json.loads(
