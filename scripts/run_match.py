@@ -169,16 +169,18 @@ def _tech_loss(reason: str) -> dict:
 
 
 async def _propose_match(client: object, args: dict) -> None:
-    """Call propose_match_tool, stripping view_radius if the remote rejects it.
+    """Call propose_match_tool, stripping optional keys if the remote rejects them.
 
-    Older server versions don't accept view_radius; this falls back gracefully.
+    Older server versions don't accept view_radius or initiator_url.
     """
     from fastmcp.exceptions import ToolError
+    _OPTIONAL = ("view_radius", "initiator_url")
     try:
         await client.call_tool("propose_match_tool", args)
     except ToolError as exc:
-        if "view_radius" in str(exc) and "unexpected" in str(exc).lower():
-            stripped = {k: v for k, v in args.items() if k != "view_radius"}
+        err = str(exc)
+        if "unexpected" in err.lower() and any(k in err for k in _OPTIONAL):
+            stripped = {k: v for k, v in args.items() if k not in _OPTIONAL}
             await client.call_tool("propose_match_tool", stripped)
         else:
             raise
@@ -427,9 +429,12 @@ async def _run_series(
                           "grid_size": list(grid), "view_radius": view_radius}
             auth = BearerAuth(_API_KEY)
             async with Client(url_b + "/mcp", auth=auth) as _cb:
-                await _propose_match(_cb, {**match_args, "my_role": b_role})
+                # Tell the opponent our URL so their take_action can call back to us.
+                await _propose_match(_cb, {**match_args, "my_role": b_role,
+                                           "initiator_url": url_a})
             async with Client(url_a + "/mcp", auth=auth) as _ca:
-                await _propose_match(_ca, {**match_args, "my_role": a_role})
+                await _propose_match(_ca, {**match_args, "my_role": a_role,
+                                           "initiator_url": url_b})
 
             thief_url = url_a if a_role == "thief" else url_b
             cop_url = url_b if a_role == "thief" else url_a
@@ -526,11 +531,15 @@ async def _notify_both_servers(
         "cop_total": cop_total, "thief_total": thief_total,
         "num_sub_games": num_sg, "results_log": results_log,
     }
+    from fastmcp.exceptions import ToolError
     for url in (url_a, url_b):
         async with Client(url + "/mcp", auth=auth) as c:
-            result = await c.call_tool("send_game_summary", payload)
-            txt = result.content[0].text if result.content else "{}"
-            print(f"[gmail] {url}: {txt}")
+            try:
+                result = await c.call_tool("send_game_summary", payload)
+                txt = result.content[0].text if result.content else "{}"
+                print(f"[gmail] {url}: {txt}")
+            except ToolError as exc:
+                print(f"[gmail] {url}: skipped — {exc}")
 
 
 def _maybe_send_report(sub_games: list[dict], series_id: str,

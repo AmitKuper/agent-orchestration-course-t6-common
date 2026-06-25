@@ -125,7 +125,7 @@ def register_agent_tools(mcp: FastMCP) -> None:
 
         from game.sdk.sdk import state_hash as sdk_hash
         from game.sdk.sdk import submit_action as sdk_submit_action
-        from game.wrappers.mcp_state import games_base
+        from game.wrappers.mcp_state import games_base, server_state
 
         try:
             result = sdk_submit_action(
@@ -137,15 +137,26 @@ def register_agent_tools(mcp: FastMCP) -> None:
             response = asdict(result)
             if result.success:
                 try:
-                    opp_url = os.environ.get("OPPONENT_MCP_URL", "").rstrip("/")
+                    # Prefer URL learned from propose_match_tool over env var.
+                    match_meta = server_state.get("matches", {}).get(game_id, {})
+                    opp_url = (
+                        match_meta.get("opponent_url")
+                        or os.environ.get("OPPONENT_MCP_URL", "")
+                    ).rstrip("/")
                     if not opp_url:
                         raise RuntimeError("OPPONENT_MCP_URL not set")
                     auth = BearerAuth(os.environ.get("MCP_API_KEY", ""))
                     async with Client(opp_url + "/mcp", auth=auth) as opp:
-                        await opp.call_tool("receive_action", {
+                        recv = await opp.call_tool("receive_action", {
                             "game_id": game_id, "actor": actor,
                             "action": action, "message": message or "",
                         })
+                        recv_data = json.loads(
+                            recv.content[0].text if recv.content else "{}"
+                        )
+                        if "error" in recv_data:
+                            response["comm_error"] = f"receive_action: {recv_data['error']}"
+                            return json.dumps(response)
                         hr = await opp.call_tool("get_hash", {"game_id": game_id})
                         opp_h = json.loads(
                             hr.content[0].text if hr.content else "{}"

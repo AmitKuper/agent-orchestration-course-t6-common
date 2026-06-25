@@ -77,6 +77,7 @@ def register_sync_tools(mcp: FastMCP) -> None:
         cop_pos: list[int], thief_pos: list[int],
         grid_size: list[int], my_role: str,
         view_radius: int = 1,
+        initiator_url: str = "",
     ) -> str:
         """Accept a match proposal and create a local game with agreed parameters.
 
@@ -90,6 +91,8 @@ def register_sync_tools(mcp: FastMCP) -> None:
             grid_size: [cols, rows] grid dimensions.
             my_role: "cop" or "thief" — this server's role in the match.
             view_radius: Chebyshev distance within which opponent is visible.
+            initiator_url: Base URL of the proposing server so this server can
+                call receive_action back on it (stored as opponent_url).
 
         Returns:
             JSON {"accepted": True, "game_id": ...}, or {"error": ...}.
@@ -114,7 +117,10 @@ def register_sync_tools(mcp: FastMCP) -> None:
                     str(games_base() / game_id),
                 )
             patch_state_game_id(game_id)
-            server_state["matches"][game_id] = {"role": my_role, "seed": seed}
+            server_state["matches"][game_id] = {
+                "role": my_role, "seed": seed,
+                "opponent_url": initiator_url,
+            }
             return json.dumps({"accepted": True, "game_id": game_id})
         except Exception as exc:
             return json.dumps({"error": str(exc)})
