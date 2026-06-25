@@ -8,21 +8,31 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
-_GAME_CONFIG: dict = {
-    "grid_size": [5, 5],
-    "max_moves": 25,
-    "max_barriers": 5,
-    "partial_observation": True,
-    "view_radius": 2,
-    "turn_timeout_seconds": 30,
-    "max_illegal_retries": 2,
+_CONFIG_PATH = Path(__file__).parent.parent.parent.parent / "config" / "config.json"
+
+_CONFIG_DEFAULTS: dict = {
+    "grid_size": [5, 5], "max_moves": 25, "max_barriers": 5,
+    "partial_observation": True, "view_radius": 2,
+    "turn_timeout_seconds": 30, "max_illegal_retries": 2,
     "max_consecutive_forfeits": 3,
 }
+
+
+def _load_game_config() -> dict:
+    """Load game config from config/config.json, falling back to built-in defaults."""
+    if _CONFIG_PATH.exists():
+        with _CONFIG_PATH.open() as fh:
+            return json.load(fh)
+    return dict(_CONFIG_DEFAULTS)
+
+
+_GAME_CONFIG: dict = _load_game_config()
 
 
 def register_resources(mcp: FastMCP) -> None:

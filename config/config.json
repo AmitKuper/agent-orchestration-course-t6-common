@@ -1,0 +1,15 @@
+{
+  "grid_size": [5, 5],
+  "max_moves": 25,
+  "num_games": 6,
+  "max_barriers": 5,
+  "partial_observation": true,
+  "view_radius": 2,
+  "turn_timeout_seconds": 30,
+  "max_illegal_retries": 2,
+  "max_consecutive_forfeits": 3,
+  "scoring": {
+    "cop_wins": {"cop": 20, "thief": 5},
+    "thief_wins": {"cop": 5, "thief": 10}
+  }
+}

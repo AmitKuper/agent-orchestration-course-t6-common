@@ -1,6 +1,6 @@
 {
   "log_level": "INFO",
   "games_dir": "games",
-  "config_path": "config/config.yaml",
+  "config_path": "config/config.json",
   "rate_limits_path": "config/rate_limits.json"
 }
