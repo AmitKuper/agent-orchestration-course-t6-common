@@ -11,6 +11,7 @@ import json
 import shutil
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastmcp import FastMCP
 
 from game.sdk.sdk import new_game as sdk_new_game
@@ -75,6 +76,7 @@ def new_game_tool(
 
 def main() -> None:
     """Parse CLI args and start the MCP HTTP server."""
+    load_dotenv(Path(__file__).resolve().parents[3] / ".env")
     parser = argparse.ArgumentParser(description="Cop & Thief MCP server")
     parser.add_argument("--port", type=int, default=8001)
     parser.add_argument("--host", default="0.0.0.0")
