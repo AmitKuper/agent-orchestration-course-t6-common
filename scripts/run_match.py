@@ -588,7 +588,7 @@ def _maybe_send_report(sub_games: list[dict], series_id: str,
 
 async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
                       models_dir: str, game_type: str, num_games: int = 6,
-                      opponent_url: str = "") -> None:
+                      opponent_url: str = "", local_url: str = "") -> None:
     """Start servers, run the sub-game series, print totals, send report."""
     cfg = _load_config()
     grid_cfg = cfg.get("grid_size", [5, 5])
@@ -634,12 +634,19 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
         env_b = {**env_b, "ACTOR_CLASS": actor_class,
                  "ACTOR_TABLE": str(mdir / "cop_qtable.npy"), "PYTHONPATH": extra_pypath}
 
+    # When local_url is given the caller owns server A — skip spawn and teardown.
+    attach_mode = bool(local_url)
     single = bool(opponent_url)
-    proc_a, proc_b = _start_servers(env_a, env_b, sys.executable, single=single)
-    url_a = "http://localhost:8001"
+    if attach_mode:
+        proc_a, proc_b = None, None
+        url_a = local_url if local_url.startswith("http") else "http://" + local_url
+    else:
+        proc_a, proc_b = _start_servers(env_a, env_b, sys.executable, single=single)
+        url_a = "http://localhost:8001"
     try:
         print("[match] waiting for servers...")
-        _wait_for_server(url_a)
+        if not attach_mode:
+            _wait_for_server(url_a)
         if not single:
             _wait_for_server(url_b)
         print(f"[match] server(s) up — opponent: {url_b}")
@@ -669,8 +676,9 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
         )
 
     finally:
-        proc_a.terminate()
-        proc_a.wait()
+        if proc_a:
+            proc_a.terminate()
+            proc_a.wait()
         if proc_b:
             proc_b.terminate()
             proc_b.wait()
@@ -694,10 +702,12 @@ def main() -> None:
                         help="Sub-games to play (0 = use config.json value, default 6)")
     parser.add_argument("--opponent-url", default="",
                         help="External opponent MCP URL — skips starting server B locally")
+    parser.add_argument("--local-url", default="",
+                        help="URL of an already-running local server — skips starting server A")
     args = parser.parse_args()
     asyncio.run(_async_main(args.seed, args.max_rounds, args.mode,
                             args.actor_class, args.models_dir, args.game_type,
-                            args.num_games, args.opponent_url))
+                            args.num_games, args.opponent_url, args.local_url))
 
 
 if __name__ == "__main__":

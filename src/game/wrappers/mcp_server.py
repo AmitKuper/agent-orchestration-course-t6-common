@@ -15,6 +15,7 @@ from fastmcp import FastMCP
 
 from game.sdk.sdk import new_game as sdk_new_game
 from game.wrappers.mcp_agent_tools import register_agent_tools
+from game.wrappers.mcp_match_tools import register_match_tools
 from game.wrappers.mcp_prompts import register_prompts
 from game.wrappers.mcp_report_tool import register_report_tool
 from game.wrappers.mcp_resources import register_resources
@@ -29,6 +30,7 @@ mcp = FastMCP(
 register_routes(mcp)
 register_agent_tools(mcp)
 register_sync_tools(mcp)
+register_match_tools(mcp)
 register_prompts(mcp)
 register_resources(mcp)
 register_report_tool(mcp)
@@ -80,6 +82,7 @@ def main() -> None:
     args = parser.parse_args()
     server_state["games_base"] = Path(args.games_dir)
     server_state["games_base"].mkdir(parents=True, exist_ok=True)
+    server_state["port"] = args.port
     mcp.run(transport="streamable-http", host=args.host, port=args.port, json_response=True)
 
 
