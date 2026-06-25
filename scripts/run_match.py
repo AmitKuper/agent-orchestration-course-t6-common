@@ -447,40 +447,38 @@ async def _run_series(
     return sub_games
 
 
-def _read_game_log(sg_id: str) -> list[dict]:
-    """Read all turn entries from the first available game.log for sg_id."""
-    for server in ("server_a", "server_b"):
-        log_path = _REPO_ROOT / "games" / server / sg_id / "game.log"
-        if log_path.exists():
-            entries = []
-            for raw in log_path.read_text(encoding="utf-8").splitlines():
-                if raw.strip():
-                    e = json.loads(raw)
-                    if e.get("type") == "turn":
-                        entries.append(e)
-            return entries
-    return []
+def _build_results_summary(sub_games: list[dict]) -> str:
+    """Build a compact per-sub-game results table for the email log.
 
+    Args:
+        sub_games: List of sub-game result dicts from _run_series.
 
-def _build_conversation(sub_games: list[dict]) -> str:
-    """Build a readable per-turn conversation log from all sub-game game.log files."""
-    parts = []
+    Returns:
+        Formatted string with one line per sub-game showing winner, role, reason,
+        rounds played, and scores.
+    """
+    lines = []
     for sg in sub_games:
-        sg_id = sg.get("sg_id", "")
-        a_role = sg["initiator_role"]
-        parts.append(f"\n--- Sub-game {sg['sub_game']} (A={a_role}) ---")
-        for e in _read_game_log(sg_id):
-            msg = e.get("message") or ""
-            parts.append(f"  R{e['turn']:2d} {e['actor']:5s}  {e['action']:7s}  {msg}")
-        winner = sg.get("winner") or "none"
-        parts.append(f"  => {winner} wins ({sg.get('win_reason', '')})")
-    return "\n".join(parts)
+        n = sg.get("sub_game", "?")
+        a_role = sg.get("initiator_role", "?")
+        b_role = "cop" if a_role == "thief" else "thief"
+        winner = sg.get("winner") or "void"
+        reason = sg.get("win_reason") or "technical_loss"
+        rounds = sg.get("rounds") or "?"
+        cop_pts = sg.get("scores", {}).get("cop", 0)
+        thief_pts = sg.get("scores", {}).get("thief", 0)
+        lines.append(
+            f"  #{n:02}  winner={winner:<6}  ({reason:<16})  "
+            f"A={a_role:<5} B={b_role:<5}  "
+            f"rounds={rounds:<3}  cop={cop_pts}pts  thief={thief_pts}pts"
+        )
+    return "\n".join(lines)
 
 
 async def _notify_both_servers(
     url_a: str, url_b: str, series_id: str,
     winner_name: str, cop_total: int, thief_total: int,
-    num_sg: int, conversation_log: str = "",
+    num_sg: int, results_log: str = "",
 ) -> None:
     """Call send_game_summary on both servers so each sends its own result email.
 
@@ -492,13 +490,13 @@ async def _notify_both_servers(
         cop_total: Total cop score.
         thief_total: Total thief score.
         num_sg: Number of valid sub-games played.
-        conversation_log: Per-turn conversation text to include in the email.
+        results_log: Per-sub-game results table to include in the email.
     """
     auth = BearerAuth(_API_KEY)
     payload = {
         "series_id": series_id, "winner_name": winner_name,
         "cop_total": cop_total, "thief_total": thief_total,
-        "num_sub_games": num_sg, "conversation_log": conversation_log,
+        "num_sub_games": num_sg, "results_log": results_log,
     }
     for url in (url_a, url_b):
         async with Client(url + "/mcp", auth=auth) as c:
@@ -586,11 +584,11 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
             a_total += sg["scores"].get(a_role, 0)
             b_total += sg["scores"].get(b_role, 0)
         winner_name = player_a if a_total >= b_total else player_b
-        conversation = _build_conversation(sub_games)
+        results = _build_results_summary(sub_games)
         await _notify_both_servers(
             url_a, url_b, series_id, winner_name,
             cop_total, thief_total, len(sub_games),
-            conversation_log=conversation,
+            results_log=results,
         )
 
     finally:
