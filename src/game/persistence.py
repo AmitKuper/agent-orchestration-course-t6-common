@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -83,6 +84,7 @@ def append_setup_log(
         "ts": datetime.now(UTC).isoformat(),
         "game_id": game_id,
         "type": "setup",
+        "player_name": os.environ.get("PLAYER_NAME", ""),
         "seed": seed,
         "grid": list(grid_size),
         "cop": list(cop_pos),
