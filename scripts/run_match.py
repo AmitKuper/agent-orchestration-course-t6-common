@@ -439,8 +439,8 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
     series_id = f"series{seed:04d}"
     print(f"[match] seed={seed} series_id={series_id} mode={mode} game_type={game_type}")
 
-    player_a = os.environ.get("PLAYER_A_NAME", "Player A")
-    player_b = os.environ.get("PLAYER_B_NAME", "Player B")
+    player_a = os.environ.get("PLAYER_NAME", "Player A")
+    player_b = os.environ.get("OPPONENT_PLAYER_NAME", "Player B")
 
     env_a = {**os.environ, "OPPONENT_MCP_URL": "http://localhost:8002",
              "MCP_API_KEY": _API_KEY, "MCP_ALLOWED_API_KEYS": _API_KEY,
