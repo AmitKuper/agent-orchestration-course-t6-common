@@ -413,7 +413,9 @@ async def _actor_game_loop(
                     print(f"  {actor} says: \"{sent_msg}\"")
                 # If the server couldn't reach the opponent (NAT/network), the
                 # orchestrator applies the action on the other server directly.
-                if "comm_error" in result and action and not result.get("game_over"):
+                # This must also run on the game-ending move: otherwise a remote
+                # action that ends the game leaves comm_error set -> false tech loss.
+                if "comm_error" in result and action:
                     try:
                         await other.call_tool("receive_action", {
                             "game_id": game_id, "actor": actor,
