@@ -112,3 +112,11 @@ def test_build_body_contains_player_name() -> None:
     """_build_body identifies the reporting player."""
     body = _build_body("Ron", "s007", "Amit", 120, 30, 6)
     assert "Ron" in body
+
+
+def test_build_body_names_both_teams() -> None:
+    """_build_body appends the playing teams line after the footer."""
+    body = _build_body("Ron", "s007", "Amit", 120, 30, 6, "", "ZeroOne-01")
+    assert "The playing teams are: Ron vs ZeroOne-01" in body
+    footer = "Sent automatically by the Cop & Thief MCP game engine."
+    assert body.index(footer) < body.index("The playing teams are:")

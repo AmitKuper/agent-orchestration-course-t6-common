@@ -55,7 +55,7 @@ def register_report_tool(mcp: FastMCP) -> None:
             subject = f"Game Result {player_name} vs {opponent} | Series {series_id}"
             body = _build_body(
                 player_name, series_id, winner_name,
-                cop_total, thief_total, num_sub_games, results_log,
+                cop_total, thief_total, num_sub_games, results_log, opponent,
             )
             send_email(recipient, subject, body)
             return json.dumps({"sent": True, "from": player_name, "to": recipient})
@@ -71,6 +71,7 @@ def _build_body(
     thief_total: int,
     num_sub_games: int,
     results_log: str = "",
+    opponent_name: str = "Opponent",
 ) -> str:
     """Build the plain-text email body for a game result summary.
 
@@ -82,6 +83,7 @@ def _build_body(
         thief_total: Total thief score.
         num_sub_games: Sub-games played.
         results_log: Per-sub-game results table to append.
+        opponent_name: Display name of the opposing player.
 
     Returns:
         Formatted plain-text body string.
@@ -100,4 +102,5 @@ def _build_body(
     if results_log:
         lines += ["", "Sub-game Results:", results_log]
     lines += ["", "Sent automatically by the Cop & Thief MCP game engine."]
+    lines += [f"The playing teams are: {player_name} vs {opponent_name}"]
     return "\n".join(lines)
