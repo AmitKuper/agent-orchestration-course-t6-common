@@ -120,3 +120,14 @@ def test_build_body_names_both_teams() -> None:
     assert "The playing teams are: Ron vs ZeroOne-01" in body
     footer = "Sent automatically by the Cop & Thief MCP game engine."
     assert body.index(footer) < body.index("The playing teams are:")
+
+
+def test_build_body_lists_players_at_end() -> None:
+    """_build_body adds a Players line with both teams' members at the very end."""
+    body = _build_body(
+        "vibecode", "s007", "vibecode", 10, 20, 2, "", "ZeroOne-01",
+        "Amit Kuperminz & Ron Marom", "Lahav Tsur & Evyatar B.",
+    )
+    expected = "Players: Amit Kuperminz & Ron Marom vs Lahav Tsur & Evyatar B."
+    assert body.rstrip().endswith(expected)
+    assert body.index("The playing teams are:") < body.index("Players:")

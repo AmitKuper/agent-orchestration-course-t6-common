@@ -25,6 +25,7 @@ def register_report_tool(mcp: FastMCP) -> None:
         num_sub_games: int,
         results_log: str = "",
         opponent_name: str = "",
+        opponent_members: str = "",
     ) -> str:
         """Send a human-readable result email from this server's player perspective.
 
@@ -39,6 +40,7 @@ def register_report_tool(mcp: FastMCP) -> None:
             num_sub_games: Number of valid sub-games played.
             results_log: Per-sub-game results table to append to the email.
             opponent_name: Display name of the opposing player (for the subject).
+            opponent_members: Player members of the opposing team (for the footer).
 
         Returns:
             JSON {"sent": True, "from": name} on success, or {"error": ...}.
@@ -50,12 +52,14 @@ def register_report_tool(mcp: FastMCP) -> None:
             if not is_enabled():
                 return json.dumps({"sent": False, "reason": "Gmail disabled"})
             player_name = os.environ.get("PLAYER_NAME", "Unknown Player")
+            player_members = os.environ.get("PLAYER_NAMES", "")
             recipient = get_recipient()
             opponent = opponent_name or "Opponent"
             subject = f"Game Result {player_name} vs {opponent} | Series {series_id}"
             body = _build_body(
                 player_name, series_id, winner_name,
                 cop_total, thief_total, num_sub_games, results_log, opponent,
+                player_members, opponent_members,
             )
             send_email(recipient, subject, body)
             return json.dumps({"sent": True, "from": player_name, "to": recipient})
@@ -72,6 +76,8 @@ def _build_body(
     num_sub_games: int,
     results_log: str = "",
     opponent_name: str = "Opponent",
+    player_members: str = "",
+    opponent_members: str = "",
 ) -> str:
     """Build the plain-text email body for a game result summary.
 
@@ -84,6 +90,8 @@ def _build_body(
         num_sub_games: Sub-games played.
         results_log: Per-sub-game results table to append.
         opponent_name: Display name of the opposing player.
+        player_members: This team's player member names.
+        opponent_members: Opposing team's player member names.
 
     Returns:
         Formatted plain-text body string.
@@ -103,4 +111,6 @@ def _build_body(
         lines += ["", "Sub-game Results:", results_log]
     lines += ["", "Sent automatically by the Cop & Thief MCP game engine."]
     lines += [f"The playing teams are: {player_name} vs {opponent_name}"]
+    if player_members or opponent_members:
+        lines += [f"Players: {player_members} vs {opponent_members}"]
     return "\n".join(lines)

@@ -28,15 +28,19 @@ def register_match_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def get_player_name() -> str:
-        """Return this server's configured player display name.
+        """Return this server's configured team name and player members.
 
-        Reads PLAYER_NAME from the environment so an opponent's orchestrator
-        can label match reports with both players' names.
+        Reads PLAYER_NAME (team) and PLAYER_NAMES (member names) from the
+        environment so an opponent's orchestrator can label match reports with
+        both teams' names and list their players.
 
         Returns:
-            JSON {"player_name": <name>}.
+            JSON {"player_name": <team>, "player_members": <members>}.
         """
-        return json.dumps({"player_name": os.environ.get("PLAYER_NAME", "Unknown Player")})
+        return json.dumps({
+            "player_name": os.environ.get("PLAYER_NAME", "Unknown Player"),
+            "player_members": os.environ.get("PLAYER_NAMES", ""),
+        })
 
     @mcp.tool()
     def start_match(

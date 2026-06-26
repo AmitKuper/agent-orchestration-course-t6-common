@@ -31,8 +31,10 @@ def test_registers_get_player_name() -> None:
 
 
 def test_get_player_name_reads_env() -> None:
-    """get_player_name returns the PLAYER_NAME environment value."""
+    """get_player_name returns PLAYER_NAME (team) and PLAYER_NAMES (members)."""
     registry = _register(MagicMock())
-    with patch("game.wrappers.mcp_match_tools.os.environ.get", return_value="ZeroOne-01"):
+    env = {"PLAYER_NAME": "ZeroOne-01", "PLAYER_NAMES": "Lahav Tsur & Evyatar B."}
+    with patch("game.wrappers.mcp_match_tools.os.environ.get",
+               side_effect=lambda k, d=None: env.get(k, d)):
         result = json.loads(registry["get_player_name"]())
-    assert result == {"player_name": "ZeroOne-01"}
+    assert result == {"player_name": "ZeroOne-01", "player_members": "Lahav Tsur & Evyatar B."}

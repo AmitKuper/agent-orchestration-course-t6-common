@@ -650,28 +650,29 @@ def _build_results_summary(sub_games: list[dict]) -> str:
     return "\n".join(lines)
 
 
-async def _fetch_player_name(url: str, fallback: str) -> str:
-    """Query a server's get_player_name tool; return fallback on failure.
+async def _fetch_player_info(url: str, fallback: str) -> tuple[str, str]:
+    """Query a server's get_player_name tool for its team name and members.
 
     Lets the orchestrator label reports with the opponent's real name instead
     of relying on a locally-configured OPPONENT_PLAYER_NAME. Older servers that
-    lack the tool fall back to the provided default.
+    lack the tool fall back to the provided default (and empty members).
 
     Args:
         url: Base URL of the server to query.
-        fallback: Name to return if the tool is missing or errors.
+        fallback: Team name to return if the tool is missing or errors.
 
     Returns:
-        The remote player's display name, or fallback.
+        (team_name, player_members); team_name falls back, members may be "".
     """
     auth = BearerAuth(_API_KEY)
     try:
         async with Client(url + "/mcp", auth=auth, timeout=10.0) as c:
             result = await c.call_tool("get_player_name", {})
             txt = result.content[0].text if result.content else "{}"
-            return json.loads(txt).get("player_name") or fallback
+            data = json.loads(txt)
+            return data.get("player_name") or fallback, data.get("player_members") or ""
     except Exception:
-        return fallback
+        return fallback, ""
 
 
 async def _notify_both_servers(
@@ -679,6 +680,7 @@ async def _notify_both_servers(
     winner_name: str, cop_total: int, thief_total: int,
     num_sg: int, results_log: str = "",
     name_a: str = "", name_b: str = "",
+    members_a: str = "", members_b: str = "",
 ) -> None:
     """Call send_game_summary on both servers so each sends its own result email.
 
@@ -696,6 +698,8 @@ async def _notify_both_servers(
         results_log: Per-sub-game results table to include in the email.
         name_a: Server A's player name (opponent of server B).
         name_b: Server B's player name (opponent of server A).
+        members_a: Server A's team member names (opponent of server B).
+        members_b: Server B's team member names (opponent of server A).
     """
     auth = BearerAuth(_API_KEY)
     base = {
@@ -704,14 +708,16 @@ async def _notify_both_servers(
         "num_sub_games": num_sg, "results_log": results_log,
     }
     from fastmcp.exceptions import ToolError
-    for url, opponent_name in ((url_a, name_b), (url_b, name_a)):
-        payload = {**base, "opponent_name": opponent_name}
+    targets = ((url_a, name_b, members_b), (url_b, name_a, members_a))
+    for url, opponent_name, opponent_members in targets:
+        payload = {**base, "opponent_name": opponent_name,
+                   "opponent_members": opponent_members}
         async with Client(url + "/mcp", auth=auth, timeout=30.0) as c:
             try:
                 result = await c.call_tool("send_game_summary", payload)
             except ToolError as exc:
-                # Older servers reject opponent_name — retry without it.
-                if "opponent_name" not in str(exc):
+                # Older servers reject the extra name args — retry without them.
+                if "opponent" not in str(exc):
                     print(f"[gmail] {url}: skipped — {exc}")
                     continue
                 result = await c.call_tool("send_game_summary", base)
@@ -807,8 +813,9 @@ async def _async_main(seed: int, max_rounds: int | None, mode: str, actor_class:
             _wait_for_server(url_b)
         print(f"[match] server(s) up — opponent: {url_b}")
 
-        # Ask the opponent server its player name so reports name both players.
-        player_b = await _fetch_player_name(url_b, player_b)
+        # Ask the opponent server its team name + members so reports name both.
+        members_a = os.environ.get("PLAYER_NAMES", "")
+        player_b, members_b = await _fetch_player_info(url_b, player_b)
         print(f"[match] players: {player_a} vs {player_b}")
 
         sub_games = await _run_series(url_a, url_b, mode, seed, loop_cap, game_type, grid,
@@ -842,6 +849,7 @@ async def _async_main(seed: int, max_rounds: int | None, mode: str, actor_class:
             url_a, url_b, series_id, winner_name,
             cop_total, thief_total, len(sub_games),
             results_log=results, name_a=player_a, name_b=player_b,
+            members_a=members_a, members_b=members_b,
         )
 
     finally:
