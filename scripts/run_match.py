@@ -126,17 +126,57 @@ def _load_config() -> dict:
     return {}
 
 
+def _find_game_logs(sg_id: str) -> list[Path]:
+    """Return all game.log paths for sg_id, regardless of games subdirectory.
+
+    Handles both auto-started (games/server_<port>/<sg_id>/) and directly
+    written (games/<sg_id>/) layouts via a recursive search, so callers never
+    depend on a hard-coded server_a/server_b directory name.
+
+    Args:
+        sg_id: Sub-game identifier.
+
+    Returns:
+        Sorted list of matching game.log paths (possibly empty).
+    """
+    return sorted(set((_REPO_ROOT / "games").rglob(f"{sg_id}/game.log")))
+
+
 def _read_terminal(sg_id: str) -> dict:
-    """Read the terminal log entry for sg_id from server_a or server_b game log."""
-    for server in ("server_a", "server_b"):
-        log_path = _REPO_ROOT / "games" / server / sg_id / "game.log"
-        if log_path.exists():
-            for raw in reversed(log_path.read_text().splitlines()):
-                if raw.strip():
-                    entry = json.loads(raw)
-                    if entry.get("type") == "terminal":
-                        return entry
+    """Read the terminal log entry for sg_id from any games subdirectory."""
+    for log_path in _find_game_logs(sg_id):
+        for raw in reversed(log_path.read_text(encoding="utf-8").splitlines()):
+            if raw.strip():
+                entry = json.loads(raw)
+                if entry.get("type") == "terminal":
+                    return entry
     return {}
+
+
+def _count_rounds(sg_id: str) -> int:
+    """Count completed rounds (thief turns) from a sub-game log on disk.
+
+    Fallback for games with no terminal entry — e.g. a game truncated by the
+    orchestrator's max-rounds cap before the engine declared an end. The engine
+    advances the round counter once per thief action, so thief turns == rounds.
+
+    Args:
+        sg_id: Sub-game identifier.
+
+    Returns:
+        Number of thief turn entries, or 0 if no log is found.
+    """
+    for log_path in _find_game_logs(sg_id):
+        count = 0
+        for raw in log_path.read_text(encoding="utf-8").splitlines():
+            if not raw.strip():
+                continue
+            entry = json.loads(raw)
+            if entry.get("type") == "turn" and entry.get("actor") == "thief":
+                count += 1
+        if count:
+            return count
+    return 0
 
 
 async def _agent_turn(
@@ -515,20 +555,27 @@ async def _run_series(
                 print(f"  TECHNICAL LOSS ({reason}) — {_MAX_SG_RETRIES - attempt} retries left")
                 continue  # retry same sub-game number
 
-            winner = result.get("winner")
-            win_reason = result.get("win_reason") or "thief_survived"
-            cop_pts, thief_pts = (20, 5) if winner == "cop" else (5, 10)
             terminal = _read_terminal(sg_id)
+            rounds = terminal.get("rounds") or _count_rounds(sg_id)
+            if result.get("game_over"):
+                winner = result.get("winner")
+                win_reason = result.get("win_reason") or "thief_survived"
+                cop_pts, thief_pts = (20, 5) if winner == "cop" else (5, 10)
+            else:
+                # The orchestrator round cap was reached before the engine ended
+                # the game: the sub-game is incomplete and earns no score.
+                winner, win_reason, cop_pts, thief_pts = None, "incomplete", 0, 0
+                print("  INCOMPLETE — round cap reached before game end (no score)")
             sub_games.append({
                 "sub_game": sg_n, "sg_id": sg_id, "initiator_role": a_role,
                 "cop": "server_b" if a_role == "thief" else "server_a",
                 "thief": "server_a" if a_role == "thief" else "server_b",
                 "winner": winner, "win_reason": win_reason,
-                "rounds": terminal.get("rounds"),
+                "rounds": rounds,
                 "barriers_used": terminal.get("barriers_used"),
                 "scores": {"cop": cop_pts, "thief": thief_pts},
             })
-            print(f"  winner={winner} ({win_reason})")
+            print(f"  winner={winner} ({win_reason})  rounds={rounds}")
             valid = True
             break
 
@@ -546,8 +593,8 @@ async def _run_series(
 def _collect_game_logs(sub_games: list[dict]) -> str:
     """Return concatenated game.log contents for all sub-games found on disk.
 
-    Searches under _REPO_ROOT/games/** for each sg_id so it works whether
-    servers were auto-started (games/server_a/) or pre-launched (games/server_8001/).
+    Uses _find_game_logs so it works regardless of the games subdirectory
+    layout (auto-started server_<port>/ or directly-written <sg_id>/).
 
     Args:
         sub_games: List of sub-game result dicts containing "sg_id".
@@ -558,7 +605,7 @@ def _collect_game_logs(sub_games: list[dict]) -> str:
     blocks: list[str] = []
     for sg in sub_games:
         sg_id = sg.get("sg_id") or f"match_sg{sg.get('sub_game', '?'):02}"
-        matches = sorted((_REPO_ROOT / "games").glob(f"*/{sg_id}/game.log"))
+        matches = _find_game_logs(sg_id)
         if not matches:
             continue
         log_path = matches[0]
@@ -585,7 +632,7 @@ def _build_results_summary(sub_games: list[dict]) -> str:
         n = sg.get("sub_game", "?")
         a_role = sg.get("initiator_role", "?")
         b_role = "cop" if a_role == "thief" else "thief"
-        winner = sg.get("winner") or "void"
+        winner = sg.get("winner") or "none"
         reason = sg.get("win_reason") or "technical_loss"
         rounds = sg.get("rounds") or "?"
         cop_pts = sg.get("scores", {}).get("cop", 0)
@@ -772,7 +819,13 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
             b_role = "cop" if a_role == "thief" else "thief"
             a_total += sg["scores"].get(a_role, 0)
             b_total += sg["scores"].get(b_role, 0)
-        winner_name = player_a if a_total >= b_total else player_b
+        # A tie (incl. an all-incomplete series scoring 0-0) has no winner.
+        if a_total > b_total:
+            winner_name = player_a
+        elif b_total > a_total:
+            winner_name = player_b
+        else:
+            winner_name = "No decisive winner"
         results = _build_results_summary(sub_games)
         game_logs = _collect_game_logs(sub_games)
         if game_logs:
