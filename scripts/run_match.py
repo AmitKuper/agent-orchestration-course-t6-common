@@ -58,6 +58,9 @@ _DIRS: dict[str, str] = {
 }
 _MAX_FORFEIT_STREAK = 3   # consecutive actor errors before technical loss
 _MAX_SG_RETRIES = 3       # max re-runs per sub-game on technical loss
+# Loop ceiling sits a couple rounds above max_moves so the engine's own
+# thief-survived terminal condition fires before the orchestrator loop cuts off.
+_LOOP_CAP_MARGIN = 2
 
 
 def _wait_for_server(url: str, timeout: float = 20.0) -> None:
@@ -728,7 +731,7 @@ def _maybe_send_report(sub_games: list[dict], series_id: str,
     print(f"[report] Sent to {os.environ.get('GMAIL_RECIPIENT')}")
 
 
-async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
+async def _async_main(seed: int, max_rounds: int | None, mode: str, actor_class: str,
                       models_dir: str, game_type: str, num_games: int = 6,
                       opponent_url: str = "", local_url: str = "",
                       port_a: int = 8001, port_b: int = 8002,
@@ -741,7 +744,10 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
     max_forfeits = int(cfg.get("max_consecutive_forfeits", _MAX_FORFEIT_STREAK))
     num_games = num_games or int(cfg.get("num_games", 6))
     view_radius = int(cfg.get("view_radius", 1))
-    max_moves = int(cfg.get("max_moves", 25))
+    # max_moves == rounds per sub-game (engine terminal condition). --max-rounds,
+    # when given, overrides config so "N rounds" means a real N-round game.
+    max_moves = max_rounds if max_rounds is not None else int(cfg.get("max_moves", 25))
+    loop_cap = max_moves + _LOOP_CAP_MARGIN
     series_id = f"series{seed:04d}"
     print(f"[match] seed={seed} series_id={series_id} mode={mode} game_type={game_type}")
 
@@ -803,7 +809,7 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
         player_b = await _fetch_player_name(url_b, player_b)
         print(f"[match] players: {player_a} vs {player_b}")
 
-        sub_games = await _run_series(url_a, url_b, mode, seed, max_rounds, game_type, grid,
+        sub_games = await _run_series(url_a, url_b, mode, seed, loop_cap, game_type, grid,
                                        turn_timeout, max_forfeits, num_games, view_radius,
                                        max_moves, time_debug)
 
@@ -850,7 +856,9 @@ def main() -> None:
     """Parse CLI args and run the async match orchestrator."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=random.randint(0, 9999))
-    parser.add_argument("--max-rounds", type=int, default=30)
+    parser.add_argument("--max-rounds", type=int, default=None,
+                        help="Rounds per sub-game (overrides config max_moves). "
+                             "Thief surviving this many rounds wins. Default: config value.")
     parser.add_argument("--mode", choices=["llm", "actor"], default="llm",
                         help="llm: LLM tool-use loop; actor: Q-table actor")
     parser.add_argument("--actor-class", default="actor_t6.qtable_actor.QTableActor",
