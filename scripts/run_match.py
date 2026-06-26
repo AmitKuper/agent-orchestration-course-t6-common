@@ -543,6 +543,33 @@ async def _run_series(
     return sub_games
 
 
+def _collect_game_logs(sub_games: list[dict]) -> str:
+    """Return concatenated game.log contents for all sub-games found on disk.
+
+    Searches under _REPO_ROOT/games/** for each sg_id so it works whether
+    servers were auto-started (games/server_a/) or pre-launched (games/server_8001/).
+
+    Args:
+        sub_games: List of sub-game result dicts containing "sg_id".
+
+    Returns:
+        Plain-text block with each sub-game log separated by a header.
+    """
+    blocks: list[str] = []
+    for sg in sub_games:
+        sg_id = sg.get("sg_id") or f"match_sg{sg.get('sub_game', '?'):02}"
+        matches = sorted((_REPO_ROOT / "games").glob(f"*/{sg_id}/game.log"))
+        if not matches:
+            continue
+        log_path = matches[0]
+        try:
+            content = log_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        blocks.append(f"=== {sg_id} ===\n{content}")
+    return "\n\n".join(blocks)
+
+
 def _build_results_summary(sub_games: list[dict]) -> str:
     """Build a compact per-sub-game results table for the email log.
 
@@ -708,6 +735,9 @@ async def _async_main(seed: int, max_rounds: int, mode: str, actor_class: str,
             b_total += sg["scores"].get(b_role, 0)
         winner_name = player_a if a_total >= b_total else player_b
         results = _build_results_summary(sub_games)
+        game_logs = _collect_game_logs(sub_games)
+        if game_logs:
+            results = results + "\n\n--- GAME LOGS ---\n" + game_logs
         await _notify_both_servers(
             url_a, url_b, series_id, winner_name,
             cop_total, thief_total, len(sub_games),
