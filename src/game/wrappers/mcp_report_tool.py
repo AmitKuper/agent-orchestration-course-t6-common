@@ -24,6 +24,7 @@ def register_report_tool(mcp: FastMCP) -> None:
         thief_total: int,
         num_sub_games: int,
         results_log: str = "",
+        opponent_name: str = "",
     ) -> str:
         """Send a human-readable result email from this server's player perspective.
 
@@ -37,6 +38,7 @@ def register_report_tool(mcp: FastMCP) -> None:
             thief_total: Total thief score across all sub-games.
             num_sub_games: Number of valid sub-games played.
             results_log: Per-sub-game results table to append to the email.
+            opponent_name: Display name of the opposing player (for the subject).
 
         Returns:
             JSON {"sent": True, "from": name} on success, or {"error": ...}.
@@ -49,7 +51,8 @@ def register_report_tool(mcp: FastMCP) -> None:
                 return json.dumps({"sent": False, "reason": "Gmail disabled"})
             player_name = os.environ.get("PLAYER_NAME", "Unknown Player")
             recipient = get_recipient()
-            subject = f"Cop & Thief — {player_name} | Series {series_id}"
+            opponent = opponent_name or "Opponent"
+            subject = f"Game Result {player_name} vs {opponent} | Series {series_id}"
             body = _build_body(
                 player_name, series_id, winner_name,
                 cop_total, thief_total, num_sub_games, results_log,

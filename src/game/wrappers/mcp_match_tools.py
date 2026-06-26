@@ -7,6 +7,7 @@ orchestrator attaches to this already-running server instead of spawning a new o
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -19,11 +20,23 @@ _RUN_MATCH = Path(__file__).resolve().parents[4] / "scripts" / "run_match.py"
 
 
 def register_match_tools(mcp: FastMCP) -> None:
-    """Register start_match tool on the MCP server.
+    """Register start_match and get_player_name tools on the MCP server.
 
     Args:
         mcp: The FastMCP server instance to attach tools to.
     """
+
+    @mcp.tool()
+    def get_player_name() -> str:
+        """Return this server's configured player display name.
+
+        Reads PLAYER_NAME from the environment so an opponent's orchestrator
+        can label match reports with both players' names.
+
+        Returns:
+            JSON {"player_name": <name>}.
+        """
+        return json.dumps({"player_name": os.environ.get("PLAYER_NAME", "Unknown Player")})
 
     @mcp.tool()
     def start_match(

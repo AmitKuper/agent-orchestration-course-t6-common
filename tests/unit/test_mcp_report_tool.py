@@ -61,6 +61,26 @@ def test_send_game_summary_sends_when_enabled() -> None:
     assert result.get("from") == "Amit"
 
 
+def test_send_game_summary_subject_names_both_players() -> None:
+    """send_game_summary subject reads 'Game Result <local> vs <opponent>'."""
+    registry = _register(MagicMock())
+    env = {
+        "GMAIL_ENABLED": "true",
+        "GMAIL_RECIPIENT": "test@example.com",
+        "PLAYER_NAME": "Amit",
+    }
+    with patch("game.gmail.gmail_plugin.os.environ.get", side_effect=env.get), \
+         patch("game.wrappers.mcp_report_tool.os.environ.get", side_effect=env.get), \
+         patch("game.gmail.sender.send_email") as mock_send:
+        registry["send_game_summary"](
+            series_id="s001", winner_name="Amit",
+            cop_total=120, thief_total=30, num_sub_games=6,
+            opponent_name="ZeroOne-01",
+        )
+    subject = mock_send.call_args.args[1]
+    assert subject == "Game Result Amit vs ZeroOne-01 | Series s001"
+
+
 def test_send_game_summary_returns_error_on_exception() -> None:
     """send_game_summary returns JSON error dict when send_email raises."""
     registry = _register(MagicMock())
