@@ -40,6 +40,19 @@ def _compute_totals(sub_games: list[dict[str, Any]]) -> dict[str, int]:
     return totals
 
 
+def _parse_player_names(names_env: str) -> list[str]:
+    """Split PLAYER_NAMES env value (e.g. 'Alice & Bob') into a list.
+
+    Args:
+        names_env: Raw env string, members separated by '&' or ','.
+
+    Returns:
+        List of stripped non-empty name strings.
+    """
+    sep = "&" if "&" in names_env else ","
+    return [n.strip() for n in names_env.split(sep) if n.strip()]
+
+
 def _build_internal_report(
     sub_games: list[dict[str, Any]],
     played_at: str,
@@ -48,7 +61,7 @@ def _build_internal_report(
     """Build internal-game report shape."""
     return {
         "group_name": os.environ.get("GROUP_NAME", ""),
-        "students": [],
+        "students": _parse_player_names(os.environ.get("PLAYER_NAMES", "")),
         "github_repo": os.environ.get("GITHUB_REPO", ""),
         "cop_mcp_url": os.environ.get("COP_MCP_URL", ""),
         "thief_mcp_url": os.environ.get("THIEF_MCP_URL", ""),
@@ -73,7 +86,7 @@ def _build_bonus_report(
         },
         "timezone": "Asia/Jerusalem",
         "played_at": played_at,
-        "students_group_1": [],
+        "students_group_1": _parse_player_names(os.environ.get("PLAYER_NAMES", "")),
         "students_group_2": [],
         "sub_games": sub_games,
         "totals_by_group": totals,
