@@ -16,7 +16,6 @@ from game.constants import (
     WIN_CAPTURE,
     WIN_COP_TRAPPED,
     WIN_THIEF_SURVIVED,
-    WIN_THIEF_TRAPPED,
 )
 from game.game_state import GameState
 from game.state import ActionResult

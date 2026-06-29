@@ -2,7 +2,7 @@
 
 All LLM calls must go through this module. No agent or service calls the API directly.
 Rate limits are read from config/rate_limits.json.
-Backend: ANTHROPIC_API_KEY set → Anthropic; otherwise → Ollama (OLLAMA_BASE_URL, default localhost).
+Backend: ANTHROPIC_API_KEY set → Anthropic; otherwise → Ollama (OLLAMA_BASE_URL).
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ from typing import Any
 
 import anthropic
 import httpx
+
+from game.shared.llm_backends import call_anthropic, call_ollama
 
 _DEFAULT_RATE_LIMITS_PATH = Path("config/rate_limits.json")
 _DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-8"
@@ -102,8 +104,10 @@ class Gatekeeper:
             self._enforce_rate_limit()
             try:
                 if self._use_anthropic:
-                    return self._call_anthropic(messages, system, max_tokens)
-                return self._call_ollama(messages, system)
+                    return call_anthropic(
+                        self._anthropic, self.model, messages, system, max_tokens
+                    )
+                return call_ollama(self._http, self._ollama_url, self.model, messages, system)
             except anthropic.RateLimitError:
                 time.sleep(_BACKOFF_BASE**attempt)
             except (anthropic.APIError, httpx.HTTPError) as exc:
@@ -112,68 +116,3 @@ class Gatekeeper:
                     raise RuntimeError(msg) from exc
                 time.sleep(_BACKOFF_BASE**attempt)
         raise RuntimeError(f"LLM call failed after {_MAX_RETRIES} attempts")
-
-    def _call_anthropic(
-        self,
-        messages: list[dict[str, str]],
-        system: str | None,
-        max_tokens: int,
-    ) -> str:
-        """Call the Anthropic API and log token usage.
-
-        Args:
-            messages: Conversation messages.
-            system: Optional system prompt.
-            max_tokens: Response token limit.
-
-        Returns:
-            Assistant response text.
-        """
-        kwargs: dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-        }
-        if system:
-            kwargs["system"] = system
-        response = self._anthropic.messages.create(**kwargs)
-        usage = response.usage
-        print(  # noqa: T201
-            f"[gatekeeper] model={self.model} in={usage.input_tokens} out={usage.output_tokens}"
-        )
-        return response.content[0].text
-
-    def _call_ollama(
-        self,
-        messages: list[dict[str, str]],
-        system: str | None,
-    ) -> str:
-        """Call the local Ollama API and log token usage.
-
-        Args:
-            messages: Conversation messages.
-            system: Optional system prompt (prepended as system role message).
-
-        Returns:
-            Assistant response text.
-        """
-        chat_messages: list[dict[str, str]] = []
-        if system:
-            chat_messages.append({"role": "system", "content": system})
-        chat_messages.extend(messages)
-        payload: dict[str, Any] = {
-            "model": self.model,
-            "messages": chat_messages,
-            "stream": False,
-            "keep_alive": "10m",
-        }
-        response = self._http.post(self._ollama_url, json=payload)
-        response.raise_for_status()
-        data = response.json()
-        # Ollama returns prompt_eval_count / eval_count (not openai-style usage)
-        in_tok = data.get("prompt_eval_count", "?")
-        out_tok = data.get("eval_count", "?")
-        print(  # noqa: T201
-            f"[gatekeeper] model={self.model} (ollama) in={in_tok} out={out_tok}"
-        )
-        return data["message"]["content"]

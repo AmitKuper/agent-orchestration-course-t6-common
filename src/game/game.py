@@ -6,12 +6,11 @@ Internal logic lives in GameRules (game_rules.py).
 
 from __future__ import annotations
 
-import hashlib
-import json
 from typing import Any
 
 from game.actions import BarrierAction, StayAction, parse_action
 from game.constants import ACTORS, COP
+from game.game_observer import compute_state_hash
 from game.game_rules import GameRules
 from game.game_state import GameState
 from game.state import ActionResult, ObservationState
@@ -133,23 +132,10 @@ class Game(GameRules):
     def state_hash(self) -> str:
         """Return an 8-char deterministic hex digest of the gameplay state.
 
-        Excludes administrative fields (game_id, mechanics, max_moves,
-        max_barriers, grid size) that can legitimately differ between server
-        versions or configurations without indicating a real state divergence.
+        Delegates to game_observer.compute_state_hash, which excludes
+        administrative fields that can differ between server versions.
         """
-        s = self._state
-        canonical = json.dumps({
-            "cop_pos": list(s.cop_pos),
-            "thief_pos": list(s.thief_pos),
-            "barriers": sorted(list(b) for b in s.barriers),
-            "round": s.round,
-            "turn": s.turn,
-            "barriers_placed": s.barriers_placed,
-            "game_over": s.game_over,
-            "winner": s.winner,
-            "win_reason": s.win_reason,
-        }, sort_keys=True)
-        return hashlib.sha256(canonical.encode()).hexdigest()[:8]
+        return compute_state_hash(self._state)
 
     def to_dict(self) -> dict:
         """Return full state as a JSON-serializable dict."""

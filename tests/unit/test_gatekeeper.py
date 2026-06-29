@@ -107,7 +107,7 @@ def test_gatekeeper_ollama_call_returns_text() -> None:
     mock_response.raise_for_status = MagicMock()
 
     with patch.dict("os.environ", env, clear=True), \
-         patch("httpx.post", return_value=mock_response):
+         patch("httpx.Client.post", return_value=mock_response):
         gk = Gatekeeper()
         result = gk.call([{"role": "user", "content": "hi"}])
 
@@ -125,10 +125,11 @@ def test_gatekeeper_ollama_prepends_system_message() -> None:
     mock_response.raise_for_status = MagicMock()
 
     with patch.dict("os.environ", env, clear=True), \
-         patch("httpx.post", return_value=mock_response) as mock_post:
+         patch("httpx.Client.post", return_value=mock_response) as mock_post:
         gk = Gatekeeper()
         gk.call([{"role": "user", "content": "hi"}], system="You are a cop.")
 
+    # Client.post is called as self._http.post(url, json=payload); args[1] is url
     payload = mock_post.call_args[1]["json"]
     assert payload["messages"][0] == {"role": "system", "content": "You are a cop."}
 

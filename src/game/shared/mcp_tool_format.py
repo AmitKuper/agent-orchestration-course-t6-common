@@ -6,6 +6,10 @@ expected by Anthropic and Ollama backends.  No I/O, no state.
 Unified tool definition schema follows Anthropic's convention (input_schema).
 Ollama wraps each tool in {"type":"function","function":{...}} and renames
 input_schema to parameters.
+
+Result-message builders (anthropic_tool_result_messages,
+ollama_tool_result_messages) live in mcp_tool_results.py and are re-exported
+here so existing callers need no import changes.
 """
 
 from __future__ import annotations
@@ -13,6 +17,18 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
+
+from game.shared.mcp_tool_results import (
+    anthropic_tool_result_messages,
+    ollama_tool_result_messages,
+)
+
+__all__ = [
+    "ToolCall", "LLMResponse",
+    "to_anthropic_tools", "to_ollama_tools",
+    "parse_anthropic_response", "parse_ollama_response",
+    "anthropic_tool_result_messages", "ollama_tool_result_messages",
+]
 
 
 @dataclass
@@ -111,52 +127,3 @@ def parse_ollama_response(response: dict[str, object]) -> LLMResponse:
             arguments=fn.get("arguments", {}),
         ))
     return LLMResponse(content=msg.get("content", ""), tool_calls=calls, raw=response)
-
-
-def anthropic_tool_result_messages(
-    tool_calls: list[ToolCall],
-    results: list[str],
-    assistant_content: object,
-) -> list[dict]:
-    """Build Anthropic conversation messages for a completed round of tool calls.
-
-    Anthropic requires tool results merged into a single user message with a
-    content list of tool_result blocks.
-
-    Args:
-        tool_calls: Tool calls from the previous LLM response.
-        results: Corresponding result strings, one per call.
-        assistant_content: Raw content blocks from the assistant response.
-
-    Returns:
-        [assistant_msg, user_msg_with_tool_results]
-    """
-    assistant_msg = {"role": "assistant", "content": assistant_content}
-    tool_results = [
-        {"type": "tool_result", "tool_use_id": tc.id, "content": r}
-        for tc, r in zip(tool_calls, results)
-    ]
-    return [assistant_msg, {"role": "user", "content": tool_results}]
-
-
-def ollama_tool_result_messages(
-    tool_calls: list[ToolCall],
-    results: list[str],
-    assistant_content: str,
-) -> list[dict]:
-    """Build Ollama conversation messages for a completed round of tool calls.
-
-    Ollama accepts one tool message per result with role="tool".
-
-    Args:
-        tool_calls: Tool calls from the previous LLM response.
-        results: Corresponding result strings, one per call.
-        assistant_content: Text content from the assistant message.
-
-    Returns:
-        [assistant_msg, ...tool_msgs]
-    """
-    msgs: list[dict] = [{"role": "assistant", "content": assistant_content}]
-    for tc, r in zip(tool_calls, results):
-        msgs.append({"role": "tool", "name": tc.name, "content": r})
-    return msgs
