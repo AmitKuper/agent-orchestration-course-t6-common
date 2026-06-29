@@ -156,6 +156,25 @@ def _read_terminal(sg_id: str) -> dict:
     return {}
 
 
+def _read_game_log(sg_id: str) -> list[dict]:
+    """Return all parsed log entries for sg_id from the first log found on disk.
+
+    Args:
+        sg_id: Sub-game identifier.
+
+    Returns:
+        List of dicts (one per log line), empty if no log exists.
+    """
+    for log_path in _find_game_logs(sg_id):
+        entries = []
+        for raw in log_path.read_text(encoding="utf-8").splitlines():
+            if raw.strip():
+                entries.append(json.loads(raw))
+        if entries:
+            return entries
+    return []
+
+
 def _count_rounds(sg_id: str) -> int:
     """Count completed rounds (thief turns) from a sub-game log on disk.
 
@@ -579,6 +598,7 @@ async def _run_series(
                 "rounds": rounds,
                 "barriers_used": terminal.get("barriers_used"),
                 "scores": {"cop": cop_pts, "thief": thief_pts},
+                "log": _read_game_log(sg_id),
             })
             print(f"  winner={winner} ({win_reason})  rounds={rounds}")
             valid = True
