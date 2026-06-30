@@ -106,7 +106,7 @@ All parameters in `config.json`/`config.yaml` — **no hard-coding**. Key defaul
 
 ## Reporting
 
-- After all 6 valid sub-games, **initiating server** emails JSON report to `rmisegal+uoh26b@gmail.com`.
+- After all 6 valid sub-games, **initiating server** emails JSON report to the address set in `GMAIL_RECIPIENT`.
 - Gmail API with token-based auth (not username/password).
 - Email body: **only the structured JSON** — no free text.
 - Report schema: see `docs/PRD.md` §10 for exact JSON shape.

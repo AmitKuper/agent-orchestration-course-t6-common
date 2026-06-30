@@ -278,7 +278,7 @@ See the assignment brief for the minimal reference implementation.
 
 ## 10. Reporting
 - At the end of all 6 **valid** sub-games, exactly **one** designated agent emails the report to
-  **`rmisegal+uoh26b@gmail.com`**. Because roles alternate, "the cop" is not a fixed sender — the
+  the address in `GMAIL_RECIPIENT`. Because roles alternate, "the cop" is not a fixed sender — the
   **initiating server** is the designated sender for the internal game; in the bonus game **each team
   sends its own** identical report from its designated sender.
 - **Send once.** The report is emailed a single time, only after 6 valid sub-games complete. Re-runs
