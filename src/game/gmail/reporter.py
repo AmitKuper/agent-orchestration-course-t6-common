@@ -72,24 +72,52 @@ def _build_internal_report(
     }
 
 
+def _bonus_claim(totals_by_group: dict[str, int]) -> dict[str, int]:
+    """Compute bonus points per group: winner=10, loser=7, tie=5 each.
+
+    Args:
+        totals_by_group: Mapping of group name → total score.
+
+    Returns:
+        Mapping of group name → bonus points awarded.
+    """
+    names = list(totals_by_group)
+    if len(names) != 2:
+        return {n: 0 for n in names}
+    g1, g2 = names
+    s1, s2 = totals_by_group[g1], totals_by_group[g2]
+    if s1 > s2:
+        return {g1: 10, g2: 7}
+    if s2 > s1:
+        return {g1: 7, g2: 10}
+    return {g1: 5, g2: 5}
+
+
 def _build_bonus_report(
     sub_games: list[dict[str, Any]],
     played_at: str,
     totals: dict[str, int],
 ) -> dict[str, Any]:
-    """Build bonus inter-group report shape."""
+    """Build bonus inter-group report shape (ex06 §9.2 schema)."""
+    g1 = os.environ.get("GROUP_NAME", "")
+    g2 = os.environ.get("OPPONENT_GROUP_NAME", "")
+    totals_by_group = {g1: totals.get("cop", 0), g2: totals.get("thief", 0)}
     return {
         "report_type": "bonus_game",
-        "groups": {
-            "group_1": os.environ.get("GROUP_NAME", ""),
-            "group_2": os.environ.get("OPPONENT_GROUP_NAME", ""),
-        },
+        "groups": {"group_1": g1, "group_2": g2},
+        "github_repo_group_1": os.environ.get("GITHUB_REPO", ""),
+        "github_repo_group_2": os.environ.get("OPPONENT_GITHUB_REPO", ""),
+        "mcp_url_group_1_cop": os.environ.get("COP_MCP_URL", ""),
+        "mcp_url_group_1_thief": os.environ.get("THIEF_MCP_URL", ""),
+        "mcp_url_group_2_cop": os.environ.get("OPPONENT_COP_MCP_URL", ""),
+        "mcp_url_group_2_thief": os.environ.get("OPPONENT_THIEF_MCP_URL", ""),
         "timezone": "Asia/Jerusalem",
         "played_at": played_at,
         "students_group_1": _parse_player_names(os.environ.get("PLAYER_NAMES", "")),
         "students_group_2": [],
         "sub_games": sub_games,
-        "totals_by_group": totals,
+        "totals_by_group": totals_by_group,
+        "bonus_claim": _bonus_claim(totals_by_group),
         "mutual_agreement": False,
     }
 
