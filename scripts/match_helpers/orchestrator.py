@@ -7,14 +7,8 @@ import sys
 from pathlib import Path
 
 from match_helpers import LOOP_CAP_MARGIN, MAX_FORFEIT_STREAK, REPO_ROOT
-from match_helpers.notifier import (
-    _build_results_summary,
-    _collect_game_logs,
-    _fetch_player_info,
-    _maybe_send_report,
-    _notify_both_servers,
-)
-from match_helpers.series import _run_series, _sg_role
+from match_helpers.notifier import _fetch_player_info, _maybe_send_report
+from match_helpers.series import _run_series
 from match_helpers.servers import (
     _load_config,
     _start_servers,
@@ -92,8 +86,7 @@ async def _async_main(
             _wait_for_server(url_b)
         print(f"[match] server(s) up — opponent: {url_b}")
 
-        members_a = os.environ.get("PLAYER_NAMES", "")
-        player_b, members_b = await _fetch_player_info(url_b, player_b)
+        player_b, _ = await _fetch_player_info(url_b, player_b)
         print(f"[match] players: {player_a} vs {player_b}")
 
         sub_games = await _run_series(
@@ -105,29 +98,6 @@ async def _async_main(
         thief_total = sum(sg["scores"]["thief"] for sg in sub_games)
         print(f"\n[series] totals: cop={cop_total}  thief={thief_total}")
         _maybe_send_report(sub_games, series_id, game_type)
-
-        a_total, b_total = 0, 0
-        for sg in sub_games:
-            a_role = _sg_role(sg["sub_game"], game_type)
-            b_role = "cop" if a_role == "thief" else "thief"
-            a_total += sg["scores"].get(a_role, 0)
-            b_total += sg["scores"].get(b_role, 0)
-        if a_total > b_total:
-            winner_name = player_a
-        elif b_total > a_total:
-            winner_name = player_b
-        else:
-            winner_name = "No decisive winner"
-        results = _build_results_summary(sub_games)
-        game_logs = _collect_game_logs(sub_games)
-        if game_logs:
-            results = results + "\n\n--- GAME LOGS ---\n" + game_logs
-        await _notify_both_servers(
-            url_a, url_b, series_id, winner_name,
-            cop_total, thief_total, len(sub_games),
-            results_log=results, name_a=player_a, name_b=player_b,
-            members_a=members_a, members_b=members_b,
-        )
     finally:
         if proc_a:
             proc_a.terminate()

@@ -65,14 +65,25 @@ def test_read_terminal_returns_entry(tmp_path: Path) -> None:
     assert terminal["rounds"] == 7
 
 
-def test_build_results_summary_renders_incomplete() -> None:
-    """Incomplete sub-games show winner=none and the incomplete reason."""
+def test_maybe_send_report_saves_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """_maybe_send_report writes email_sent.json under games/<series_id>/."""
     sub_games = [{
-        "sub_game": 1, "initiator_role": "thief", "winner": None,
-        "win_reason": "incomplete", "rounds": 2,
-        "scores": {"cop": 0, "thief": 0},
+        "sub_game": 1, "winner": "cop", "win_reason": "capture",
+        "rounds": 3, "scores": {"cop": 20, "thief": 5},
     }]
-    summary = notifier._build_results_summary(sub_games)
-    assert "incomplete" in summary
-    assert "none" in summary
-    assert "rounds=2" in summary
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GROUP_NAME", "test-group")
+    monkeypatch.setenv("PLAYER_NAMES", "Alice & Bob")
+    monkeypatch.setenv("GITHUB_REPO", "https://github.com/test/repo")
+    monkeypatch.setenv("COP_MCP_URL", "http://localhost:8001")
+    monkeypatch.setenv("THIEF_MCP_URL", "http://localhost:8002")
+    monkeypatch.setenv("GMAIL_ENABLED", "false")   # skip actual sending
+
+    notifier._maybe_send_report(sub_games, "series0042")
+
+    out = tmp_path / "games" / "series0042" / "email_sent.json"
+    assert out.exists(), "email_sent.json was not created"
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["group_name"] == "test-group"
+    assert data["github_repo"] == "https://github.com/test/repo"
+    assert data["totals"] == {"cop": 20, "thief": 5}
